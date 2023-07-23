@@ -1,0 +1,26 @@
+I want to make an evolution simulator that is capable of evolving new organic 
+methods of development. It can evolve the algorithms of development, not just
+the parameters of some predefined algorithm or structured datatype that defines
+the phenotype directly from the genotype.
+
+Evolvable developmental algorithms (genetically encoded decoders/cellular 
+automaton) require a stable multi-species, multi-phylum evolution algorithm,
+so that several competing phylum, with different developmental systems, are
+able to trial several different species that each feed different parameters
+into a similar developmental system. In order to make this feasible, there
+ought to be periods of isolation between many desparate populations of
+organisms that are only occasionally put into direct competition, so that each
+phylum has a chance to explore the parameter space of it's own developmental
+algorithm. In addition, competition /= reproductive compatibility in the case
+that I implement some kind of sexual reproduction scheme, so that independant
+systems of development aren't weighed down by their own doomed crossbreeds.
+
+The periodic competition between groups could be implemented by occasional
+migration between the discrete groups.
+
+Each group/isolated environment could have a population limit, some large, some
+small. Maybe it's configured in a fractal way, so that there groups of nodes
+with some rate of migration between them, and that group of nodes is in a
+larger network of other groups of nodes with some lesser degree of migration.
+In hopes that a complex array of different solution to the problem can be
+thoroughly enumerated.
