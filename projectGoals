@@ -24,3 +24,28 @@ with some rate of migration between them, and that group of nodes is in a
 larger network of other groups of nodes with some lesser degree of migration.
 In hopes that a complex array of different solution to the problem can be
 thoroughly enumerated.
+
+The problem I'd like to solve with this evolutionary model is PolyBridge,
+because it should let me see visually the structural problems the evolutionary
+algorithm as a whole is trying to solve, and easily evaluate the ability of
+different phyla to co-evolve.
+
+Development Steps:
+• Design an evolutionary algorithm, that supports some turring-complete
+	developmental language
+	• Using Gene Regulatory Network as developmental language, which acts on a
+		cellularized organism topology (nodes and edges are cells, grid is cells?
+		cell type morphogen endogenous)
+	• GRN is encoded in genome data structure, specifically designating GRN layout,
+		weights, and interactions. Mutations to the structure are defined for every
+		element, including addition, deletion, duplication, enable/disable (for
+		inactive, but still mutatable elements)
+• Recreate polybridge
+	• Create bridge datastructure
+		• simply defines a bridge structure
+	• Create bridge editor mode
+        • Get a GUI running
+		• create renderer for bridge structure
+		• create interface for editing bridge structure
+	• Choose a physics engine
+	• Create bridge simulator
