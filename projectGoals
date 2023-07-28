@@ -3,6 +3,12 @@ methods of development. It can evolve the algorithms of development, not just
 the parameters of some predefined algorithm or structured datatype that defines
 the phenotype directly from the genotype.
 
+The development stage will be based on a reaction-diffusion system of
+morphogens that can mathematically interact in a networked way, a bit like
+neural networks meets reaction diffusion in order to mimic genetic regulatory
+networks and DNA binding proteins in biology, specifically cis-regulatory
+modules.
+
 Evolvable developmental algorithms (genetically encoded decoders/cellular 
 automaton) require a stable multi-species, multi-phylum evolution algorithm,
 so that several competing phylum, with different developmental systems, are
@@ -48,4 +54,6 @@ Development Steps:
 		• create renderer for bridge structure
 		• create interface for editing bridge structure
 	• Choose a physics engine
+        • Box2D
 	• Create bridge simulator
+    • Probably time for a refactor?

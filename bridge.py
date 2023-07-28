@@ -20,7 +20,7 @@ class Edge:
                 self.color = (8, 8, 10)
                 self.thickness = 5
             case "cable":
-                self.maxLength = 200
+                self.maxLength = 1000
                 self.strength = 1
                 self.color = (184, 188, 188)
                 self.thickness = 2
