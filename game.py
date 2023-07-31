@@ -3,24 +3,17 @@
 # Right mouse button and drag to move existing nodes. Nodes can be merged.
 # d while hovering over a node to delete it.
 import os
+import json
 import math
 import random
 import pygame
+import pygame.gfxdraw
 import bridge
+
+import Box2D
 
 import cProfile
 import pstats
-
-main_dir = os.path.split(os.path.abspath(__file__))[0]
-data_dir = os.path.join(main_dir, "data")
-
-# initialize
-pygame.init()
-screen = pygame.display.set_mode((1280, 720))
-pygame.display.set_caption("PolyBridge")
-clock = pygame.time.Clock()
-running = True
-dt = 0
 
 
 def load_png(name):
@@ -107,6 +100,7 @@ class DebugLine(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.move_ip(p)
 
+
 class NodeGameObject(pygame.sprite.Sprite):
     """ A game object that handels rendering and user interaction with the
     node objects"""
@@ -119,10 +113,13 @@ class NodeGameObject(pygame.sprite.Sprite):
         self.image, self.rect = load_png("node.png")
         self.updatePosition()
         self.moving = False
+        self.simulate = False
 
     def update(self):
         # do stuff like update position based on mouse inputs
-        if self.moving:
+        if self.simulate:
+            self.rect.center = box2dToPygame(self.node.b2body.position)
+        elif self.moving:
             self.updatePosition()
 
     def startMoving(self):
@@ -133,6 +130,15 @@ class NodeGameObject(pygame.sprite.Sprite):
 
     def updatePosition(self):
         self.rect.center = self.node.location
+
+    def getSerializableObject(self):
+        return {"location": self.node.location,
+                "type": self.node.type}
+
+    def loadSerializableObject(serializableObject):
+        location = serializableObject["location"]
+        type = serializableObject["type"]
+        return NodeGameObject(bridge.Node(location, type))
 
 
 class EdgeGameObject(pygame.sprite.Sprite):
@@ -146,10 +152,33 @@ class EdgeGameObject(pygame.sprite.Sprite):
         self.moving = False
         self.radius = self.edge.thickness / 2
         self.updatePosition()
+        self.tension = 0
+        self.simulate = False
 
-    def update(self):
+    def update(self, invdt=0):
         # Sprite update
-        if self.moving:
+        if self.simulate and not self.edge.broken:
+
+            # update the tension value from joint reaction forces, if there
+            # are two joints still attached
+            if len(self.edge.joints) >= 2:
+                # difference in joint forces (force differential referenced[0],
+                # that's parent[0])
+                appliedForce = vsub(self.edge.joints[1]
+                                    .GetReactionForce(invdt),
+                                    self.edge.joints[0]
+                                    .GetReactionForce(invdt))
+                # find direction of edge (edge vector)
+                edgeVector = vunit(vsub(self.edge.parents[1].b2body.position,
+                                        self.edge.parents[0].b2body.position))
+                # find differential force in direction of edge
+                self.tension = vdot(appliedForce, edgeVector)
+            else:
+                self.tension = 0
+
+            tensions.append(self.tension)
+
+        if self.moving or self.simulate and not self.edge.broken:
             self.updatePosition()
 
     def startMoving(self):
@@ -159,38 +188,92 @@ class EdgeGameObject(pygame.sprite.Sprite):
         self.moving = False
 
     def updatePosition(self):
-        p1 = self.edge.parents[0].location
-        p2 = self.edge.parents[1].location
-        width = abs(p1[0] - p2[0])
-        height = abs(p1[1] - p2[1])
+        if not self.edge.broken:
+            if simulate:
+                p1 = box2dToPygame(self.edge.parents[0].b2body.position)
+                p2 = box2dToPygame(self.edge.parents[1].b2body.position)
+            else:
+                p1 = self.edge.parents[0].location
+                p2 = self.edge.parents[1].location
+            width = abs(p1[0] - p2[0])
+            height = abs(p1[1] - p2[1])
 
-        # calculate the sprite local corrdinates and sprite location (p)
-        # depending on parent relative locations
+            # calculate the sprite local corrdinates and sprite location (p)
+            # depending on parent relative locations
 
-        p = p1
-        p1l = (self.radius, self.radius)
-        if p1[0] >= p2[0]:
-            p1l = (width + self.radius, p1l[1])
-            p = (p2[0], p[1])
-        if p1[1] >= p2[1]:
-            p1l = (p1l[0], height + self.radius)
-            p = (p[0], p2[1])
+            p = p1
+            p1l = (self.radius, self.radius)
+            if p1[0] >= p2[0]:
+                p1l = (width + self.radius, p1l[1])
+                p = (p2[0], p[1])
+            if p1[1] >= p2[1]:
+                p1l = (p1l[0], height + self.radius)
+                p = (p[0], p2[1])
 
-        p2l = (self.radius, self.radius)
-        if p2[0] >= p1[0]:
-            p2l = (width + self.radius, p2l[1])
-        if p2[1] >= p1[1]:
-            p2l = (p2l[0], height + self.radius)
+            p2l = (self.radius, self.radius)
+            if p2[0] >= p1[0]:
+                p2l = (width + self.radius, p2l[1])
+            if p2[1] >= p1[1]:
+                p2l = (p2l[0], height + self.radius)
 
-        self.image = pygame.Surface((self.radius * 2 + width,
-                                     self.radius * 2 + height))
-        KEY = (255, 255, 255)
-        self.image.fill(KEY)
-        self.image.set_colorkey(KEY)
-        pygame.draw.line(self.image, self.edge.color,
-                         p1l, p2l, width=self.edge.thickness)
-        self.rect = self.image.get_rect()
-        self.rect.move_ip(p)
+            self.image = pygame.Surface((self.radius * 2 + width,
+                                         self.radius * 2 + height))
+            KEY = (255, 255, 255)
+            self.image.fill(KEY)
+            self.image.set_colorkey(KEY)
+            pygame.draw.line(self.image, self.edge.color,
+                             p1l, p2l, width=self.edge.thickness)
+            self.rect = self.image.get_rect()
+            self.rect.move_ip(p)
+        else:
+            # empty image for broken edge
+            self.image = pygame.Surface((0, 0))
+
+    def getSerializableObject(self, nodes):
+        parent1Obj = self.edge.parents[0]
+        parent2Obj = self.edge.parents[1]
+        p1done = False
+        p2done = False
+        for (i, node) in enumerate(nodes):
+            if node.node == parent1Obj and not p1done:
+                parent1 = i
+                p1done = True
+            if node.node == parent2Obj and not p2done:
+                parent2 = i
+                p2done = True
+            if p1done and p2done:
+                break
+        else:
+            # no parents, for some reason
+            if not p1done:
+                parent1 = None
+            if not p2done:
+                parent2 = None
+
+        return {"parents": [parent1, parent2],
+                "type": self.edge.type}
+
+    def loadSerializableObject(serializableObject, nodes):
+        parent1 = serializableObject["parents"][0]
+        parent2 = serializableObject["parents"][1]
+
+        # Make sure there was a parent
+        if parent1 is not None:
+            parent1Obj = nodes[parent1].node
+        else:
+            parent1Obj = bridge.Node()
+        if parent2 is not None:
+            parent2Obj = nodes[parent2].node
+        else:
+            parent2Obj = bridge.Node()
+
+        type = serializableObject["type"]
+        return EdgeGameObject(bridge.Edge((parent1Obj,
+                                           parent2Obj), type))
+
+
+def serializeBridge():
+    pass
 
 
 def vsum(a, b):
@@ -223,17 +306,27 @@ def vdot(a, b):
     return a[0] * b[0] + a[1] * b[1]
 
 
+def pygameToBox2d(position):
+    """
+    switch coordinate systems from pygame pixels to Box2D meters
+    """
+    position = (position[0], screen.get_height() - position[1])
+    position = vdiv(position, PPM)
+    return position
+
+
+def box2dToPygame(position):
+    """
+    switch coordinate systems from Box2D meters to pygame pixels
+    """
+    position = vmul(position, PPM)
+    position = (position[0], SCREEN_HEIGHT - position[1])
+    return position
+
+
 # generate a unit vector at the specified angle
 def u(theta):
     return (math.cos(theta), math.sin(theta))
-
-
-debugs = []
-debugCriticalPoints = []
-debugDeleteLines = []
-debug = False
-debugCursor = DebugCircle((0, 0), 5)
-debugs.append(debugCursor)
 
 
 def randomHue(color):
@@ -244,14 +337,11 @@ def randomHue(color):
     return newColor
 
 
-colorObj = pygame.Color(0, 0, 0)
-colorObj.hsva = (216, 64, 100)
-debugRadii_c = pygame.Color(colorObj)
-colorObj.hsva = (0, 100, 100)
-debugPoints_c = pygame.Color(colorObj)
-
-
 def calculateNewPosition(goalPos):
+    """
+    Calculates the new position of a nodes[-1] respecting the edge length
+    constraints of it's connected edges.
+    """
     originalPosition = nodes[-1].node.location
     nodes[-1].node.location = goalPos
     # calculate new position based on cusor position and max
@@ -506,10 +596,58 @@ def calculateNewPosition(goalPos):
     return True
 
 
+def resetBridge():
+    # create some anchor points
+    anchor1pos = (screen.get_width() / 2 + 75 * 3,
+                  screen.get_height() / 2)
+    anchor2pos = (screen.get_width() / 2 - 75 * 3,
+                  screen.get_height() / 2)
+    nodes.append(NodeGameObject(bridge.Node(anchor1pos)))
+    nodes[-1].node.type = "fixed"
+    nodes.append(NodeGameObject(bridge.Node(anchor2pos)))
+    nodes[-1].node.type = "fixed"
+
+
+
+main_dir = os.path.split(os.path.abspath(__file__))[0]
+data_dir = os.path.join(main_dir, "data")
+
+# initialize
+pygame.init()
+screen = pygame.display.set_mode((1280, 720))
+pygame.display.set_caption("PolyBridge")
+clock = pygame.time.Clock()
+running = True
+# time step in milliseconds
+dt = 0
+
+debugs = []
+debugCriticalPoints = []
+debugDeleteLines = []
+debug = False
+debugCursor = DebugCircle((0, 0), 5)
+debugs.append(debugCursor)
+
+colorObj = pygame.Color(0, 0, 0)
+colorObj.hsva = (216, 64, 100)
+debugRadii_c = pygame.Color(colorObj)
+colorObj.hsva = (0, 100, 100)
+debugPoints_c = pygame.Color(colorObj)
+
 background = pygame.Surface(screen.get_size())
 background = background.convert()
 background.fill((42, 234, 148))
-
+anchor1pos = (screen.get_width() / 2 + 75 * 3,
+              screen.get_height() / 2)
+anchor2pos = (screen.get_width() / 2 - 75 * 3,
+              screen.get_height() / 2)
+pygame.draw.rect(background, (255, 255, 255),
+                 (anchor1pos,
+                  (screen.get_width() - anchor1pos[0],
+                   screen.get_height() / 2)))
+pygame.draw.rect(background, (255, 255, 255),
+                 ((0, anchor2pos[1]),
+                  (anchor2pos[0], screen.get_height() / 2)))
 
 # add text to background
 font = pygame.font.Font(None, 36)
@@ -525,24 +663,44 @@ collidingNode = None
 connectedEdges = []
 
 
-# create some anchor points
-nodes.append(NodeGameObject(bridge.Node(
-    (screen.get_width() / 4, screen.get_height() / 2))))
-nodes[-1].node.type = "fixed"
-nodes.append(NodeGameObject(bridge.Node(
-    (screen.get_width() * 3 / 4, screen.get_height() / 2))))
-nodes[-1].node.type = "fixed"
+edgeMode = "road"
+simulate = False
+
+# Physics engine stuff, Box2D
+
+# --- constants ---
+# Box2D deals with meters, but we want to display pixels,
+# so define a conversion factor:
+PPM = 20.0  # pixels per meter
+TARGET_FPS = 60
+TIME_STEP = 1.0 / TARGET_FPS
+SCREEN_WIDTH, SCREEN_HEIGHT = screen.get_width(), screen.get_height()
+# inverse timestep in inverse seconds
+invdt = TARGET_FPS
+
+colors = {
+    Box2D.b2_staticBody: (255, 255, 255, 100),
+    Box2D.b2_dynamicBody: (127, 127, 127, 100),
+}
+
+# --- pybox2d world setup ---
+# Create the world
+world = Box2D.b2World(gravity=(0, -10), doSleep=True)
+
+# list of bodies for simulation
+box2dBodies = []
+
+resetBridge()
 
 # update sprite arrays
 nodeSprites = pygame.sprite.RenderPlain(nodes)
 edgeSprites = pygame.sprite.RenderPlain(edges)
 debugSprites = pygame.sprite.RenderPlain(debugs)
 
-edgeMode = "road"
-
 pr = cProfile.Profile()
 pr.enable()
 
+tensions = []
 # game loop runs once per 1/60th of a second.
 while running:
     for event in pygame.event.get():
@@ -552,7 +710,7 @@ while running:
             if event.key == pygame.K_F3:
                 debug = not debug
 
-            if event.key == pygame.K_d:
+            if event.key == pygame.K_d and not simulate:
                 mousepos = pygame.mouse.get_pos()
                 # check for nodes colliding with cursor to delete
                 # ([:] for copy of list since I'm modifying it while iterating)
@@ -580,7 +738,7 @@ while running:
                              edge.edge.parents[0].location)
                     bunit = vunit(b)
                     adotbunit = vdot(a, bunit)
-                    d = math.sqrt(amag * amag - adotbunit * adotbunit)
+                    d = math.sqrt(max(amag * amag - adotbunit * adotbunit, 0))
 
                     if adotbunit > 0 and adotbunit < vmag(b):
                         # it's within the range of the edge (it's right next to
@@ -600,7 +758,7 @@ while running:
                                     DebugLine(bbase, mousepos, 3, (255, 0, 0)))
 
                         # check range
-                        if d < 20:
+                        if d < 10:
                             edges.remove(edge)
                             # just remove one edge
                             break
@@ -615,7 +773,274 @@ while running:
             if event.key == pygame.K_3:
                 edgeMode = "cable"
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.key == pygame.K_s and not simulate:
+                # save the bridge
+                jsonBridge = {"nodes": [],
+                              "edges": []}
+
+                for node in nodes:
+                    jsonBridge["nodes"].append(
+                            node.getSerializableObject())
+
+                for edge in edges:
+                    jsonBridge["edges"].append(
+                            edge.getSerializableObject(nodes))
+
+                with open('savedBridge', 'w', encoding="utf-8") as f:
+                    f.write(json.dumps(jsonBridge))
+
+            if event.key == pygame.K_l and not simulate:
+                # load a bridge from file
+                with open('savedBridge', 'r', encoding="utf-8") as f:
+                    jsonString = f.read()
+
+                jsonBridge = json.loads(jsonString)
+
+                nodes.clear()
+                edges.clear()
+
+                for node in jsonBridge["nodes"]:
+                    nodes.append(NodeGameObject.loadSerializableObject(node))
+
+                for edge in jsonBridge["edges"]:
+                    edges.append(
+                            EdgeGameObject.loadSerializableObject(edge, nodes))
+
+                nodeSprites = pygame.sprite.RenderPlain(nodes)
+                edgeSprites = pygame.sprite.RenderPlain(edges)
+                collidingNode = None
+
+            if event.key == pygame.K_r and not simulate:
+                nodes.clear()
+                edges.clear()
+                collidingNode = None
+                connectedEdges = []
+                resetBridge()
+                nodeSprites = pygame.sprite.RenderPlain(nodes)
+                edgeSprites = pygame.sprite.RenderPlain(edges)
+
+            if event.key == pygame.K_SPACE:
+                # clear the last simulation
+                if simulate:
+                    simulate = False
+
+                    for node in nodes:
+                        node.simulate = False
+                        node.node.b2body = None
+                        node.updatePosition()
+
+                    for edge in edges:
+                        edge.simulate = False
+                        edge.edge.joints = []
+                        edge.edge.broken = False
+                        edge.edge.b2bodies.clear()
+                        edge.updatePosition()
+
+                    for body in box2dBodies:
+                        world.DestroyBody(body)
+                    box2dBodies.clear()
+
+                else:
+                    simulate = True
+
+                    # rebuild the static ground
+                    anchor1pos = (screen.get_width() / 2 + 75 * 3,
+                                  screen.get_height() / 2)
+                    anchor2pos = (screen.get_width() / 2 - 75 * 3,
+                                  screen.get_height() / 2)
+                    size = vdiv((
+                            (screen.get_width() - anchor1pos[0]) / 2,
+                            (screen.get_height() - anchor1pos[1]) / 2), PPM)
+
+                    center = pygameToBox2d((
+                        (screen.get_width() - anchor1pos[0]) / 2 + anchor1pos[0],
+                        (screen.get_height() - anchor1pos[1]) / 2 + anchor1pos[1]))
+
+                    ground_body_right = world.CreateStaticBody(
+                            position=center,
+                            shapes=Box2D.b2PolygonShape(box=size))
+                    ground_body_right.fixtures[0].filterData.groupIndex = -1
+                    ground_body_right.fixtures[0].filterData.categoryBits = 0x0002
+                    ground_body_right.fixtures[0].filterData.maskBits = 0x0002
+
+                    size = vdiv((
+                            (anchor2pos[0]) / 2,
+                            (screen.get_height() - anchor2pos[1]) / 2), PPM)
+
+                    center = pygameToBox2d((
+                        (anchor2pos[0]) / 2,
+                        (screen.get_height() - anchor2pos[1]) / 2 + anchor2pos[1]))
+
+                    leftShape = Box2D.b2PolygonShape(
+                            box=(size[0], size[1],
+                                 (center[0], center[1]), 0))
+
+                    # And a static body to hold the ground shape
+                    ground_body_left = world.CreateStaticBody(
+                            position=center,
+                            shapes=Box2D.b2PolygonShape(box=size))
+                    ground_body_left.fixtures[0].filterData.groupIndex = -1
+                    ground_body_left.fixtures[0].filterData.categoryBits = 0x0002
+                    ground_body_left.fixtures[0].filterData.maskBits = 0x0002
+
+                    box2dBodies.append(ground_body_left)
+                    box2dBodies.append(ground_body_right)
+
+                    # make the car
+                    carwheelbase = 2.5
+                    carheight = 1
+                    carwheelradius = 0.5
+                    carpos = vsum(pygameToBox2d(
+                                (0, screen.get_height() / 2)),
+                                              (carwheelbase,
+                                               carheight / 2 + carwheelradius))
+                    wheeloffset = vsum(carpos, (carwheelbase / 2,
+                                                -carheight / 2))
+                    wheel2offset = vsum(carpos,
+                                        (-carwheelbase / 2,
+                                         -carheight / 2))
+                    carbody = world.CreateDynamicBody(
+                            position=carpos,
+                            shapes=[Box2D.b2PolygonShape(
+                                box=(carwheelbase / 2, carheight / 2))],
+                            shapeFixture=Box2D.b2FixtureDef(
+                                density=1,
+                                friction=0.3,
+                                categoryBits=0x0002,
+                                maskBits=0x0002))
+                    wheel1 = world.CreateDynamicBody(
+                            position=wheeloffset,
+                            shapes=[Box2D.b2CircleShape(
+                                radius=carwheelradius)],
+                            shapeFixture=Box2D.b2FixtureDef(
+                                density=1,
+                                friction=0.3,
+                                categoryBits=0x0002,
+                                maskBits=0x0002))
+                    wheel2 = world.CreateDynamicBody(
+                            position=wheel2offset,
+                            shapes=[Box2D.b2CircleShape(
+                                radius=carwheelradius)],
+                            shapeFixture=Box2D.b2FixtureDef(
+                                density=1,
+                                friction=0.3,
+                                categoryBits=0x0002,
+                                maskBits=0x0002))
+
+                    world.CreateRevoluteJoint(
+                            bodyA=carbody,
+                            bodyB=wheel1,
+                            anchor=wheeloffset,
+                            motorSpeed=-10,
+                            maxMotorTorque=50,
+                            enableMotor=True)
+                    world.CreateRevoluteJoint(
+                            bodyA=carbody,
+                            bodyB=wheel2,
+                            anchor=wheel2offset,
+                            motorSpeed=-10,
+                            maxMotorTorque=50,
+                            enableMotor=True)
+
+                    box2dBodies.append(carbody)
+                    box2dBodies.append(wheel1)
+                    box2dBodies.append(wheel2)
+
+                    # construct the physics simulation
+                    for node in nodes:
+                        # generate a body with circle shape fixed to it for each
+                        # node
+                        # change of coordinates
+                        node.simulate = True
+                        position = pygameToBox2d(node.node.location)
+
+                        # body type depends on movable/fixed type of node
+                        match node.node.type:
+
+                            case "movable":
+                                node.node.b2body = world.CreateDynamicBody(
+                                        position=position)
+
+                            case "fixed":
+                                node.node.b2body = world.CreateStaticBody(
+                                        position=position)
+
+                        node.node.b2body.CreateCircleFixture(
+                                radius=0.5, friction=0.3)
+
+                        # add the body to the list for simulation
+                        box2dBodies.append(node.node.b2body)
+
+                    for edge in edges:
+                        edge.simulate = True
+                        pos1 = pygameToBox2d(edge.edge.parents[0].location)
+                        pos2 = pygameToBox2d(edge.edge.parents[1].location)
+                        vec = vsub(pos2, pos1)
+                        length = vmag(vec)
+                        width = 5 / PPM
+                        # find center point between parents
+                        center = vsum(pos1, vdiv(vec, 2))
+
+                        if edge.edge.type != "cable":
+                            # check for bounds of acos function, l != 0
+                            if length > 0:
+                                # find angle
+                                if vec[1] >= 0:
+                                    angle = math.acos(min(vec[0] / length, 1))
+                                else:
+                                    angle = -math.acos(min(vec[0] / length, 1))
+
+                                edgeBody = world.CreateDynamicBody(
+                                        position=center, angle=angle)
+                            else:
+                                # edge of zero length...
+                                edgeBody = world.CreateDynamicBody(
+                                        position=center, angle=0)
+
+                            # now add a shape
+                            edgeBody.CreatePolygonFixture(
+                                    box=(length / 2, width / 2),
+                                    density=1,
+                                    friction=0.3)
+
+                            # collisionfilter to keep edges from colliding with
+                            # each other
+                            edgeBody.fixtures[0].filterData.groupIndex = -1
+
+                            # add collisions with car
+                            if edge.edge.type == "road":
+                                edgeBody.fixtures[0].filterData.categoryBits = 0x0002
+                                edgeBody.fixtures[0].filterData.maskBits = 0x0002
+
+                            # now create some joints to the node parents.
+                            joint1 = world.CreateRevoluteJoint(
+                                    bodyA=edge.edge.parents[0].b2body,
+                                    bodyB=edgeBody,
+                                    anchor=pos1)
+
+                            joint2 = world.CreateRevoluteJoint(
+                                    bodyA=edge.edge.parents[1].b2body,
+                                    bodyB=edgeBody,
+                                    anchor=pos2)
+
+                            edge.edge.joints = [joint1, joint2]
+
+                            edge.edge.b2bodies.append(edgeBody)
+                            box2dBodies.append(edgeBody)
+
+                        else:
+                            # cable rope joint
+                            ropeJoint = world.CreateRopeJoint(
+                                    bodyA=edge.edge.parents[0].b2body,
+                                    bodyB=edge.edge.parents[1].b2body,
+                                    anchorA=pygameToBox2d(
+                                        edge.edge.parents[0].location),
+                                    anchorB=pygameToBox2d(
+                                        edge.edge.parents[1].location),
+                                    collideConnected=True)
+                            edge.edge.joints.append(ropeJoint)
+
+        if event.type == pygame.MOUSEBUTTONDOWN and not simulate:
 
             # on left mouse button: create new node, connected to last node
             # or to the node just clicked on.
@@ -685,7 +1110,7 @@ while running:
                         # pr.disable()
                         break
 
-        if event.type == pygame.MOUSEBUTTONUP:
+        if event.type == pygame.MOUSEBUTTONUP and not simulate:
             if len(nodes) > 0:
                 nodeSprites.update()
                 nodes[-1].stopMoving()
@@ -725,9 +1150,6 @@ while running:
                             edges.remove(edge)
                             continue
                         else:
-                            # TODO: Might still be duplicate, hard to check for
-                            # duplicate edges
-
                             # re-assign the edge's parents
                             # Also keep track of the other connected Node, to
                             # check for other edges that reference the same
@@ -742,6 +1164,8 @@ while running:
                                                      collidingNode.node)
                                 uniqueNode = edge.edge.parents[0]
 
+                    # keep track of unique parent nodes to solve for duplicate
+                    # edges
                     elif collidingNode.node in edge.edge.parents:
                         index = edge.edge.parents.index(collidingNode.node)
                         if index == 0:
@@ -758,6 +1182,7 @@ while running:
                     # here, either collidingNode or nodes[-1] are the parent,
                     # but not both, and not neither.
                     # uniqueNode has been defined.
+                    # Now check for duplicate nodes
                     if uniqueNode in uniqueNodes:
                         # this node has been see already, and since the
                         # iteration is in reverse order, we prioritize
@@ -778,7 +1203,7 @@ while running:
                 edgeSprites = pygame.sprite.RenderPlain(edges)
                 collidingNode = None
 
-        if event.type == pygame.MOUSEMOTION:
+        if event.type == pygame.MOUSEMOTION and not simulate:
             debugCursor.pos = event.pos
             # check for collisions of mouse with other nodes, default none
             collidingNode = None
@@ -800,8 +1225,11 @@ while running:
                             if calculateNewPosition(node.node.location):
                                 # nodes[-1].node.location = node.node.location
                                 collidingNode = node
-                                reachedOtherNode = True
-                                break
+                            reachedOtherNode = True
+                            # actually, I want to stop on the first hit, and
+                            # just put the node as close as possible to it, to
+                            # make designing easier
+                            break
 
                     # if it can't reach the other node (calculateNewPosition
                     # evaluated false) then calculateNewPosition again against
@@ -820,9 +1248,9 @@ while running:
         # print("Mouse is down")
         pass
 
-    # update sprites
+    # update sprites/game objects
     nodeSprites.update()
-    edgeSprites.update()
+    edgeSprites.update(invdt)
     if debug:
         debugCriticalPointsSprites = pygame.sprite.RenderPlain(
                 debugCriticalPoints)
@@ -831,18 +1259,92 @@ while running:
         debugCriticalPointsSprites.update()
         debugDeleteLinesSprites.update()
 
+    for edge in edges:
+        # check for breakage condition
+        if edge.tension > edge.edge.tensileStrength or edge.tension < -edge.edge.compressiveStrength:
+            if not edge.edge.broken:
+                edge.edge.broken = True
+                edge.tension = 0
+                edge.updatePosition()
+                # breakage condition, could do a fancy break beam in half
+                # thing. I'll just break the joint for now
+                # or just remove it from the simulation
+                if edge.edge.type != "cable":
+                    body = edge.edge.b2bodies.pop()
+                    world.DestroyBody(body)
+                    box2dBodies.remove(body)
+                else:
+                    # cable type, destroy the joint
+                    world.DestroyJoint(edge.edge.joints.pop())
+                # world.DestroyJoint(edge.edge.joints.pop())
+
     # draw to the screen
+    # clear the screen
     screen.blit(background, (0, 0))
+
+    # Draw the physics world from Box2D's perspective
+    if debug:
+        # for body in box2dBodies:
+        for body in world.bodies:
+            # The body gives us the position and angle of its shapes
+            for fixture in body.fixtures:
+                # The fixture holds information like density and friction,
+                # and also the shape.
+                shape = fixture.shape
+                match shape.type:
+
+                    # render polygons for generic
+                    case Box2D.b2Shape.e_polygon:
+                        vertices = [(body.transform * v) * PPM
+                                    for v in shape.vertices]
+
+                        vertices = [(int(v[0]), int(SCREEN_HEIGHT - v[1]))
+                                    for v in vertices]
+
+                        # pygame.gfxdraw.aapolygon(screen,
+                        #                          vertices,
+                        #                          colors[body.type])
+                        pygame.draw.polygon(screen,
+                                            colors[body.type],
+                                            vertices)
+
+                    case Box2D.b2Shape.e_circle:
+                        center = body.transform * shape.pos * PPM
+                        center = (int(center[0]),
+                                  int(SCREEN_HEIGHT - center[1]))
+                        radius = int(shape.radius * PPM)
+
+                        # pygame.gfxdraw.aacircle(screen,
+                        #                         center[0],
+                        #                         center[1],
+                        #                         radius,
+                        #                         colors[body.type])
+                        pygame.draw.circle(screen,
+                                           colors[body.type],
+                                           center,
+                                           radius)
+
+    # render using pygame sprites
     edgeSprites.draw(screen)
     nodeSprites.draw(screen)
     if debug:
         debugSprites.draw(screen)
         debugCriticalPointsSprites.draw(screen)
         debugDeleteLinesSprites.draw(screen)
+
+    # Make Box2D simulate the physics of our world for one step.
+    # Instruct the world to perform a single step of simulation. It is
+    # generally best to keep the time step and iterations fixed.
+    # See the manual (Section "Simulating the World") for further discussion
+    # on these parameters and their implications.
+    world.Step(TIME_STEP, 30, 30)
+
+    # Flip buffers
     pygame.display.flip()
 
-    # clock.tick() returns milliseconds since last call.
-    dt = clock.tick(60) / 1000
+    # clock.tick() returns seconds last call.
+    dt = clock.tick(TARGET_FPS) / 1000
+    # invdt = 1 / dt
 
 pr.disable()
 # pr.create_stats()
