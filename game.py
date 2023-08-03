@@ -101,6 +101,26 @@ class DebugLine(pygame.sprite.Sprite):
         self.rect.move_ip(p)
 
 
+class CarGameObject(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)
+        self.orig_image, self.rect = load_png("car.png")
+        self.b2body = None
+        self.angle = 0
+        self.rotateImage()
+        self.rect.center = (-200, -200)
+
+    def update(self):
+        if self.b2body is not None:
+            self.rect.center = box2dToPygame(self.b2body.position)
+            self.angle = self.b2body.angle / 2 / math.pi * 360
+            self.rotateImage()
+
+    def rotateImage(self):
+        self.image = pygame.transform.rotate(self.orig_image, self.angle)
+        self.rect = self.image.get_rect(center=self.rect.center)
+
+
 class NodeGameObject(pygame.sprite.Sprite):
     """ A game object that handels rendering and user interaction with the
     node objects"""
@@ -173,7 +193,12 @@ class EdgeGameObject(pygame.sprite.Sprite):
                                         self.edge.parents[0].b2body.position))
                 # find differential force in direction of edge
                 self.tension = vdot(appliedForce, edgeVector)
+            elif self.edge.type == "cable" and len(self.edge.joints) >= 1:
+                # for cable types
+                self.tension = 2 * vmag(self.edge.joints[0]
+                                        .GetReactionForce(invdt))
             else:
+                # other/unknown type
                 self.tension = 0
 
             tensions.append(self.tension)
@@ -306,6 +331,31 @@ def vdot(a, b):
     return a[0] * b[0] + a[1] * b[1]
 
 
+def vangle(a):
+    """
+    return the angle the given vector makes with the x axis
+    """
+    length = vmag(a)
+    if a[1] >= 0:
+        return math.acos(min(a[0] / length, 1))
+    else:
+        return -math.acos(min(a[0] / length, 1))
+
+
+def u(theta):
+    """
+    generate a unit vector at the specified angle
+    """
+    return (math.cos(theta), math.sin(theta))
+
+
+def vrot(a, theta):
+    """
+    rotate a vector by an angle
+    """
+    return vmul(u(vangle(a) + theta), vmag(a))
+
+
 def pygameToBox2d(position):
     """
     switch coordinate systems from pygame pixels to Box2D meters
@@ -322,11 +372,6 @@ def box2dToPygame(position):
     position = vmul(position, PPM)
     position = (position[0], SCREEN_HEIGHT - position[1])
     return position
-
-
-# generate a unit vector at the specified angle
-def u(theta):
-    return (math.cos(theta), math.sin(theta))
 
 
 def randomHue(color):
@@ -608,7 +653,6 @@ def resetBridge():
     nodes[-1].node.type = "fixed"
 
 
-
 main_dir = os.path.split(os.path.abspath(__file__))[0]
 data_dir = os.path.join(main_dir, "data")
 
@@ -659,6 +703,7 @@ background.blit(text, textpos)
 
 nodes = []
 edges = []
+car = CarGameObject()
 collidingNode = None
 connectedEdges = []
 
@@ -693,6 +738,7 @@ box2dBodies = []
 resetBridge()
 
 # update sprite arrays
+carSprite = pygame.sprite.RenderPlain(car)
 nodeSprites = pygame.sprite.RenderPlain(nodes)
 edgeSprites = pygame.sprite.RenderPlain(edges)
 debugSprites = pygame.sprite.RenderPlain(debugs)
@@ -701,6 +747,7 @@ pr = cProfile.Profile()
 pr.enable()
 
 tensions = []
+steps = 0
 # game loop runs once per 1/60th of a second.
 while running:
     for event in pygame.event.get():
@@ -838,23 +885,28 @@ while running:
 
                     for body in box2dBodies:
                         world.DestroyBody(body)
+
+                    car.b2body = None
                     box2dBodies.clear()
 
                 else:
                     simulate = True
+                    steps = 0
 
                     # rebuild the static ground
                     anchor1pos = (screen.get_width() / 2 + 75 * 3,
-                                  screen.get_height() / 2)
+                                  screen.get_height() / 2 - 2.5)
                     anchor2pos = (screen.get_width() / 2 - 75 * 3,
-                                  screen.get_height() / 2)
+                                  screen.get_height() / 2 - 2.5)
                     size = vdiv((
                             (screen.get_width() - anchor1pos[0]) / 2,
                             (screen.get_height() - anchor1pos[1]) / 2), PPM)
 
                     center = pygameToBox2d((
-                        (screen.get_width() - anchor1pos[0]) / 2 + anchor1pos[0],
-                        (screen.get_height() - anchor1pos[1]) / 2 + anchor1pos[1]))
+                        (screen.get_width() -
+                            anchor1pos[0]) / 2 + anchor1pos[0],
+                        (screen.get_height() -
+                            anchor1pos[1]) / 2 + anchor1pos[1]))
 
                     ground_body_right = world.CreateStaticBody(
                             position=center,
@@ -888,7 +940,7 @@ while running:
 
                     # make the car
                     carwheelbase = 2.5
-                    carheight = 1
+                    carheight = 1.5
                     carwheelradius = 0.5
                     carpos = vsum(pygameToBox2d(
                                 (0, screen.get_height() / 2)),
@@ -914,7 +966,7 @@ while running:
                                 radius=carwheelradius)],
                             shapeFixture=Box2D.b2FixtureDef(
                                 density=1,
-                                friction=0.3,
+                                friction=1,
                                 categoryBits=0x0002,
                                 maskBits=0x0002))
                     wheel2 = world.CreateDynamicBody(
@@ -923,7 +975,7 @@ while running:
                                 radius=carwheelradius)],
                             shapeFixture=Box2D.b2FixtureDef(
                                 density=1,
-                                friction=0.3,
+                                friction=1,
                                 categoryBits=0x0002,
                                 maskBits=0x0002))
 
@@ -942,14 +994,15 @@ while running:
                             maxMotorTorque=50,
                             enableMotor=True)
 
+                    car.b2body = carbody
                     box2dBodies.append(carbody)
                     box2dBodies.append(wheel1)
                     box2dBodies.append(wheel2)
 
                     # construct the physics simulation
                     for node in nodes:
-                        # generate a body with circle shape fixed to it for each
-                        # node
+                        # generate a body with circle shape fixed to it for
+                        # each node
                         # change of coordinates
                         node.simulate = True
                         position = pygameToBox2d(node.node.location)
@@ -965,8 +1018,8 @@ while running:
                                 node.node.b2body = world.CreateStaticBody(
                                         position=position)
 
-                        node.node.b2body.CreateCircleFixture(
-                                radius=0.5, friction=0.3)
+                        # node.node.b2body.CreateCircleFixture(
+                        #         radius=0.5, friction=0.3)
 
                         # add the body to the list for simulation
                         box2dBodies.append(node.node.b2body)
@@ -985,10 +1038,11 @@ while running:
                             # check for bounds of acos function, l != 0
                             if length > 0:
                                 # find angle
-                                if vec[1] >= 0:
-                                    angle = math.acos(min(vec[0] / length, 1))
-                                else:
-                                    angle = -math.acos(min(vec[0] / length, 1))
+                                # if vec[1] >= 0:
+                                #     angle = math.acos(min(vec[0] / length, 1))
+                                # else:
+                                #     angle = -math.acos(min(vec[0] / length, 1))
+                                angle = vangle(vec)
 
                                 edgeBody = world.CreateDynamicBody(
                                         position=center, angle=angle)
@@ -1030,6 +1084,7 @@ while running:
 
                         else:
                             # cable rope joint
+                            # ropeJoint = world.CreateRopeJoint(
                             ropeJoint = world.CreateRopeJoint(
                                     bodyA=edge.edge.parents[0].b2body,
                                     bodyB=edge.edge.parents[1].b2body,
@@ -1037,7 +1092,10 @@ while running:
                                         edge.edge.parents[0].location),
                                     anchorB=pygameToBox2d(
                                         edge.edge.parents[1].location),
-                                    collideConnected=True)
+                                    collideConnected=True,
+                                    maxLength=math.dist(
+                                        edge.edge.parents[0].location,
+                                        edge.edge.parents[1].location) / PPM)
                             edge.edge.joints.append(ropeJoint)
 
         if event.type == pygame.MOUSEBUTTONDOWN and not simulate:
@@ -1249,6 +1307,7 @@ while running:
         pass
 
     # update sprites/game objects
+    carSprite.update()
     nodeSprites.update()
     edgeSprites.update(invdt)
     if debug:
@@ -1259,24 +1318,26 @@ while running:
         debugCriticalPointsSprites.update()
         debugDeleteLinesSprites.update()
 
-    for edge in edges:
-        # check for breakage condition
-        if edge.tension > edge.edge.tensileStrength or edge.tension < -edge.edge.compressiveStrength:
-            if not edge.edge.broken:
-                edge.edge.broken = True
-                edge.tension = 0
-                edge.updatePosition()
-                # breakage condition, could do a fancy break beam in half
-                # thing. I'll just break the joint for now
-                # or just remove it from the simulation
-                if edge.edge.type != "cable":
-                    body = edge.edge.b2bodies.pop()
-                    world.DestroyBody(body)
-                    box2dBodies.remove(body)
-                else:
-                    # cable type, destroy the joint
-                    world.DestroyJoint(edge.edge.joints.pop())
-                # world.DestroyJoint(edge.edge.joints.pop())
+    # let the simulation settle before breaking stuff
+    if steps > 60 * 2 and simulate:
+        for edge in edges:
+            # check for breakage condition
+            if edge.tension > edge.edge.tensileStrength or edge.tension < -edge.edge.compressiveStrength:
+                if not edge.edge.broken:
+                    edge.edge.broken = True
+                    edge.tension = 0
+                    edge.updatePosition()
+                    # breakage condition, could do a fancy break beam in half
+                    # thing. I'll just break the joint for now
+                    # or just remove it from the simulation
+                    if edge.edge.type != "cable" and len(edge.edge.b2bodies) > 0:
+                        body = edge.edge.b2bodies.pop()
+                        world.DestroyBody(body)
+                        box2dBodies.remove(body)
+                    elif len(edge.edge.joints) > 0:
+                        # cable type, destroy the joint
+                        world.DestroyJoint(edge.edge.joints.pop())
+                    # world.DestroyJoint(edge.edge.joints.pop())
 
     # draw to the screen
     # clear the screen
@@ -1325,12 +1386,106 @@ while running:
                                            radius)
 
     # render using pygame sprites
+    carSprite.draw(screen)
     edgeSprites.draw(screen)
-    nodeSprites.draw(screen)
+    if not simulate:
+        nodeSprites.draw(screen)
+
     if debug:
         debugSprites.draw(screen)
         debugCriticalPointsSprites.draw(screen)
         debugDeleteLinesSprites.draw(screen)
+
+    # draw the tension/compression forces
+    # if simulate and steps > 60 * 2:
+    if simulate:
+        for edge in edges:
+            tension = edge.tension
+            edge1pos = box2dToPygame(edge.edge.parents[0].b2body.position)
+            edge2pos = box2dToPygame(edge.edge.parents[1].b2body.position)
+            edgeVec = vsub(edge2pos,
+                           edge1pos)
+            unitVec = vunit(edgeVec)
+            length = tension * vmag(edgeVec) / 2
+            arrowWidth = 2
+            arrowAngle = 30 * 2 * math.pi / 360
+
+            # set arrow colors. Grey if within settling period
+            if steps > 60 * 2:
+                arrowColorTension = (255, 0, 0)
+                arrowColorCompression = (0, 0, 255)
+            else:
+                arrowColorTension = (200, 200, 200)
+                arrowColorCompression = arrowColorTension
+
+            if tension > 0:
+                loc = vdiv(vsum(edge2pos,
+                                edge1pos),
+                           2)
+                length /= edge.edge.tensileStrength
+
+                head1 = vsum(vmul(unitVec, length), loc)
+                head2 = vsum(vmul(unitVec, -length), loc)
+
+                # Draw two outward facing arrows
+                pygame.draw.line(screen, arrowColorTension,
+                                 head2, head1,
+                                 width=arrowWidth)
+
+                pygame.draw.line(screen, arrowColorTension,
+                                 head1,
+                                 vsum(head1,
+                                      vrot(vmul(unitVec, -length / 4), arrowAngle)),
+                                 width=arrowWidth)
+                pygame.draw.line(screen, arrowColorTension,
+                                 head1,
+                                 vsum(head1,
+                                      vrot(vmul(unitVec, -length / 4), -arrowAngle)),
+                                 width=arrowWidth)
+
+                pygame.draw.line(screen, arrowColorTension,
+                                 head2,
+                                 vsum(head2,
+                                      vrot(vmul(unitVec, length / 4), arrowAngle)),
+                                 width=arrowWidth)
+                pygame.draw.line(screen, arrowColorTension,
+                                 head2,
+                                 vsum(head2,
+                                      vrot(vmul(unitVec, length / 4), -arrowAngle)),
+                                 width=arrowWidth)
+            elif tension < 0:
+                length /= -edge.edge.compressiveStrength
+                head1 = vsum(vmul(unitVec, length), edge1pos)
+                head2 = vsum(vmul(unitVec, -length), edge2pos)
+                # Draw two arrows facing inward
+                pygame.draw.line(screen, arrowColorCompression, edge1pos,
+                                 head1,
+                                 width=arrowWidth)
+                pygame.draw.line(screen, arrowColorCompression, edge2pos,
+                                 head2,
+                                 width=arrowWidth)
+
+                pygame.draw.line(screen, arrowColorCompression,
+                                 head1,
+                                 vsum(head1,
+                                      vrot(vmul(unitVec, -length / 4), arrowAngle)),
+                                 width=arrowWidth)
+                pygame.draw.line(screen, arrowColorCompression,
+                                 head1,
+                                 vsum(head1,
+                                      vrot(vmul(unitVec, -length / 4), -arrowAngle)),
+                                 width=arrowWidth)
+
+                pygame.draw.line(screen, arrowColorCompression,
+                                 head2,
+                                 vsum(head2,
+                                      vrot(vmul(unitVec, length / 4), arrowAngle)),
+                                 width=arrowWidth)
+                pygame.draw.line(screen, arrowColorCompression,
+                                 head2,
+                                 vsum(head2,
+                                      vrot(vmul(unitVec, length / 4), -arrowAngle)),
+                                 width=arrowWidth)
 
     # Make Box2D simulate the physics of our world for one step.
     # Instruct the world to perform a single step of simulation. It is
@@ -1345,11 +1500,15 @@ while running:
     # clock.tick() returns seconds last call.
     dt = clock.tick(TARGET_FPS) / 1000
     # invdt = 1 / dt
+    steps += 1
 
 pr.disable()
 # pr.create_stats()
 pr.dump_stats("profile")
-pstats.Stats("profile").sort_stats(pstats.SortKey.CUMULATIVE, pstats.SortKey.CALLS).print_stats()
-pstats.Stats("profile").sort_stats(pstats.SortKey.CUMULATIVE, pstats.SortKey.CALLS).print_callers()
-pstats.Stats("profile").sort_stats(pstats.SortKey.TIME, pstats.SortKey.CALLS).print_callers()
+pstats.Stats("profile").sort_stats(
+        pstats.SortKey.CUMULATIVE, pstats.SortKey.CALLS).print_stats()
+pstats.Stats("profile").sort_stats(
+        pstats.SortKey.CUMULATIVE, pstats.SortKey.CALLS).print_callers()
+pstats.Stats("profile").sort_stats(
+        pstats.SortKey.TIME, pstats.SortKey.CALLS).print_callers()
 pygame.quit()

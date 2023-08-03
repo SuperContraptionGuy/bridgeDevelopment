@@ -34,7 +34,7 @@ class Edge:
                 self.thickness = 5
             case "cable":
                 self.maxLength = 1000
-                self.tensileStrength = 500
+                self.tensileStrength = 1000
                 self.compressiveStrength = 1000
                 self.color = (184, 188, 188)
                 self.thickness = 2
