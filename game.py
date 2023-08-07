@@ -2,6 +2,12 @@
 # previous node, or connected to the node clicked on. Nodes can be merged.
 # Right mouse button and drag to move existing nodes. Nodes can be merged.
 # d while hovering over a node to delete it.
+# hovering over another node while moving a node will merge the two if in
+# range, or snap to the closest point in range of edge constraints to the
+# node hovered over
+# 1, 2, 3 to change edge type to road, beam, or cable
+# s to save and l to load a bridge from file
+# <spacebar> to start/stop the physics simulation
 import os
 import json
 import math
@@ -130,7 +136,10 @@ class NodeGameObject(pygame.sprite.Sprite):
         self.node = node
         # load an image from disk. Alternatively, render using graphic
         # functions
-        self.image, self.rect = load_png("node.png")
+        # self.image, self.rect = load_png("node.png")
+        self.radius = 10
+        self.color = (255, 255, 255)
+        self.updateImage()
         self.updatePosition()
         self.moving = False
         self.simulate = False
@@ -141,6 +150,16 @@ class NodeGameObject(pygame.sprite.Sprite):
             self.rect.center = box2dToPygame(self.node.b2body.position)
         elif self.moving:
             self.updatePosition()
+
+    def updateImage(self):
+        self.image = pygame.Surface((self.radius*2, self.radius*2))
+        KEY = (254, 254, 254)
+        self.image.fill(KEY)
+        self.image.set_colorkey(KEY)
+        pygame.draw.circle(self.image, self.color,
+                           (self.radius, self.radius), self.radius)
+        self.image.set_alpha(200)
+        self.rect = self.image.get_rect()
 
     def startMoving(self):
         self.moving = True
@@ -200,8 +219,6 @@ class EdgeGameObject(pygame.sprite.Sprite):
             else:
                 # other/unknown type
                 self.tension = 0
-
-            tensions.append(self.tension)
 
         if self.moving or self.simulate and not self.edge.broken:
             self.updatePosition()
@@ -297,8 +314,127 @@ class EdgeGameObject(pygame.sprite.Sprite):
                                            parent2Obj), type))
 
 
-def serializeBridge():
-    pass
+class BridgeObject:
+    def __init__(self):
+        self.nodes = []
+        self.edges = []
+        self.collidingNode = None
+        self.connectedEdges = []
+
+    def reloadBridge(self):
+        self.collidingNode = None
+        self.connectedEdges = []
+
+
+class SpritesManager:
+    def __init__(self, bridgeObj):
+        self.carSprite = pygame.sprite.RenderPlain(car)
+        self.nodeSprites = pygame.sprite.RenderPlain(bridgeObj.nodes)
+        self.edgeSprites = pygame.sprite.RenderPlain(bridgeObj.edges)
+        self.debugSprites = pygame.sprite.RenderPlain(debugs)
+        self.debugCriticalPointsSprites = pygame.sprite.RenderPlain(
+            debugCriticalPoints)
+        self.debugDeleteLinesSprites = pygame.sprite.RenderPlain(
+            debugDeleteLines)
+
+    def reloadBridgeSprites(self, bridgeObj):
+        self.nodeSprites = pygame.sprite.RenderPlain(bridgeObj.nodes)
+        self.edgeSprites = pygame.sprite.RenderPlain(bridgeObj.edges)
+
+    def reloadDebugSprites(self):
+        self.debugSprites = pygame.sprite.RenderPlain(debugs)
+        self.debugCriticalPointsSprites = pygame.sprite.RenderPlain(
+            debugCriticalPoints)
+        self.debugDeleteLinesSprites = pygame.sprite.RenderPlain(
+            debugDeleteLines)
+
+
+levelNames = ["Short Gap", "Wide Gap", "Pedistal"]
+# first two nodes define left and right ground static bodies respectively
+levels = {levelNames[0]:    [(-3, 0),
+                             (3, 0)],
+          levelNames[1]:    [(-5, 0),
+                             (5, 0),
+                             (-5, 1),
+                             (5, 1)],
+          levelNames[2]:    [(-5, 0),
+                             (5, 0),
+                             (0, 2)]
+          }
+
+
+def loadLevel(level, bridgeObj, screen):
+    bridgeObj.nodes.clear()
+    bridgeObj.edges.clear()
+    # leftmost = (screen.get_width(), 0)
+    # rightmost = (0, 0)
+    for node in levels[level]:
+        bridgeObj.nodes.append(NodeGameObject(bridge.Node(
+            (screen.get_width() / 2 + 75 * node[0],
+             screen.get_height() / 2 + 75 * node[1]))))
+        bridgeObj.nodes[-1].node.type = "fixed"
+
+        # if bridgeObj.nodes[-1].node.location[0] > rightmost[0]:
+        #     rightmost = bridgeObj.nodes[-1].node.location
+        # if bridgeObj.nodes[-1].node.location[0] < leftmost[0]:
+        #     leftmost = bridgeObj.nodes[-1].node.location
+
+    # leftmost = (leftmost[0], screen.get_height() / 2)
+    # rightmost = (rightmost[0], screen.get_height() / 2)
+    leftmost = levels[level][0]
+    leftmost = (screen.get_width() / 2 + 75 * leftmost[0],
+                screen.get_height() / 2 + 75 * leftmost[1])
+    rightmost = levels[level][1]
+    rightmost = (screen.get_width() / 2 + 75 * rightmost[0],
+                 screen.get_height() / 2 + 75 * rightmost[1])
+
+    background.fill((42, 234, 148))
+    pygame.draw.rect(background, (255, 255, 255),
+                     (rightmost,
+                      (screen.get_width() - rightmost[0],
+                       screen.get_height() / 2)))
+    pygame.draw.rect(background, (255, 255, 255),
+                     ((0, leftmost[1]),
+                      (leftmost[0], screen.get_height() / 2)))
+
+    # add text to background
+    font = pygame.font.Font(None, 36)
+    text = font.render("Bio-Polybridge! Level: " + level, 1, (234, 148, 42))
+    textpos = text.get_rect()
+    textpos.centerx = background.get_rect().centerx
+    background.blit(text, textpos)
+
+    sprites.reloadBridgeSprites(bridgeObj)
+
+
+def serializeBridge(bridgeObj):
+    jsonBridge = {"nodes": [],
+                  "edges": []}
+
+    for node in bridgeObj.nodes:
+        jsonBridge["nodes"].append(
+                node.getSerializableObject())
+
+    for edge in bridgeObj.edges:
+        jsonBridge["edges"].append(
+                edge.getSerializableObject(bridgeObj.nodes))
+
+    return jsonBridge
+
+
+def deserializeBridge(jsonBridge, bridgeObj):
+    bridgeObj.nodes.clear()
+    bridgeObj.edges.clear()
+
+    for node in jsonBridge["nodes"]:
+        bridgeObj.nodes.append(NodeGameObject.loadSerializableObject(node))
+
+    for edge in jsonBridge["edges"]:
+        bridgeObj.edges.append(
+                EdgeGameObject.loadSerializableObject(edge, bridgeObj.nodes))
+
+
+# def updateBridgeSprites(nodeSprites
 
 
 def vsum(a, b):
@@ -382,13 +518,13 @@ def randomHue(color):
     return newColor
 
 
-def calculateNewPosition(goalPos):
+def calculateNewPosition(goalPos, bridgeObj):
     """
     Calculates the new position of a nodes[-1] respecting the edge length
     constraints of it's connected edges.
     """
-    originalPosition = nodes[-1].node.location
-    nodes[-1].node.location = goalPos
+    originalPosition = bridgeObj.nodes[-1].node.location
+    bridgeObj.nodes[-1].node.location = goalPos
     # calculate new position based on cusor position and max
     # edge lengths
     criticalPoints = []
@@ -407,11 +543,11 @@ def calculateNewPosition(goalPos):
     # is called, only if the node[-1] is changed, or edges are added
     # cannot be run in the for edge loop after this, since not all nodes will
     # be reconfigured before they are used.
-    for edge in connectedEdges:
-        if edge.edge.parents.index(nodes[-1].node) != 0:
+    for edge in bridgeObj.connectedEdges:
+        if edge.edge.parents.index(bridgeObj.nodes[-1].node) != 0:
             edge.edge.parents = (edge.edge.parents[1], edge.edge.parents[0])
 
-    for edge in connectedEdges:
+    for edge in bridgeObj.connectedEdges:
 
         # see which edges can reach cursor, calculate closest point for those
         # that can't reach and add that point to the criticalPoints list if
@@ -443,7 +579,7 @@ def calculateNewPosition(goalPos):
             # not been defined above.
             rVecInRange = True
 
-        edges2 = connectedEdges[:]
+        edges2 = bridgeObj.connectedEdges[:]
         edges2.remove(edge)
         # we must iterate all edge2's every time, not just in last if statement
         for edge2 in edges2:
@@ -620,7 +756,7 @@ def calculateNewPosition(goalPos):
                     closestDist = dist
                     closestPoint = point
 
-            nodes[-1].node.location = closestPoint
+            bridgeObj.nodes[-1].node.location = closestPoint
             # return False, meaning did not reach the goal position
             return False
         else:
@@ -629,7 +765,7 @@ def calculateNewPosition(goalPos):
             # off by just a rounding error, or the nodes were positioned
             # beforehand in a way that broke the constraints.
             # the node shouldn't be moved at all.
-            nodes[-1].node.location = originalPosition
+            bridgeObj.nodes[-1].node.location = originalPosition
             return False
 
     # was able to reach goal position directly? return true
@@ -639,18 +775,6 @@ def calculateNewPosition(goalPos):
     # node[-1] has alread been moved to the goal poisition at the top
     # of this function, so nothing more to do.
     return True
-
-
-def resetBridge():
-    # create some anchor points
-    anchor1pos = (screen.get_width() / 2 + 75 * 3,
-                  screen.get_height() / 2)
-    anchor2pos = (screen.get_width() / 2 - 75 * 3,
-                  screen.get_height() / 2)
-    nodes.append(NodeGameObject(bridge.Node(anchor1pos)))
-    nodes[-1].node.type = "fixed"
-    nodes.append(NodeGameObject(bridge.Node(anchor2pos)))
-    nodes[-1].node.type = "fixed"
 
 
 main_dir = os.path.split(os.path.abspath(__file__))[0]
@@ -678,39 +802,6 @@ debugRadii_c = pygame.Color(colorObj)
 colorObj.hsva = (0, 100, 100)
 debugPoints_c = pygame.Color(colorObj)
 
-background = pygame.Surface(screen.get_size())
-background = background.convert()
-background.fill((42, 234, 148))
-anchor1pos = (screen.get_width() / 2 + 75 * 3,
-              screen.get_height() / 2)
-anchor2pos = (screen.get_width() / 2 - 75 * 3,
-              screen.get_height() / 2)
-pygame.draw.rect(background, (255, 255, 255),
-                 (anchor1pos,
-                  (screen.get_width() - anchor1pos[0],
-                   screen.get_height() / 2)))
-pygame.draw.rect(background, (255, 255, 255),
-                 ((0, anchor2pos[1]),
-                  (anchor2pos[0], screen.get_height() / 2)))
-
-# add text to background
-font = pygame.font.Font(None, 36)
-text = font.render("Bio-Polybridge!", 1, (234, 148, 42))
-textpos = text.get_rect()
-textpos.centerx = background.get_rect().centerx
-background.blit(text, textpos)
-
-
-nodes = []
-edges = []
-car = CarGameObject()
-collidingNode = None
-connectedEdges = []
-
-
-edgeMode = "road"
-simulate = False
-
 # Physics engine stuff, Box2D
 
 # --- constants ---
@@ -728,6 +819,20 @@ colors = {
     Box2D.b2_dynamicBody: (127, 127, 127, 100),
 }
 
+bridgeObj = BridgeObject()
+
+car = CarGameObject()
+# update sprite arrays
+sprites = SpritesManager(bridgeObj)
+
+background = pygame.Surface(screen.get_size())
+loadLevel(levelNames[0], bridgeObj, screen)
+level = 0
+
+edgeMode = "road"
+simulate = False
+
+
 # --- pybox2d world setup ---
 # Create the world
 world = Box2D.b2World(gravity=(0, -10), doSleep=True)
@@ -735,18 +840,10 @@ world = Box2D.b2World(gravity=(0, -10), doSleep=True)
 # list of bodies for simulation
 box2dBodies = []
 
-resetBridge()
-
-# update sprite arrays
-carSprite = pygame.sprite.RenderPlain(car)
-nodeSprites = pygame.sprite.RenderPlain(nodes)
-edgeSprites = pygame.sprite.RenderPlain(edges)
-debugSprites = pygame.sprite.RenderPlain(debugs)
 
 pr = cProfile.Profile()
 pr.enable()
 
-tensions = []
 steps = 0
 # game loop runs once per 1/60th of a second.
 while running:
@@ -761,20 +858,20 @@ while running:
                 mousepos = pygame.mouse.get_pos()
                 # check for nodes colliding with cursor to delete
                 # ([:] for copy of list since I'm modifying it while iterating)
-                for node in nodes:
+                for node in bridgeObj.nodes:
                     if node.rect.collidepoint(mousepos) and node.node.type == "movable":
                         # find edges that include this node and remove them
-                        for edge in edges[:]:
+                        for edge in bridgeObj.edges[:]:
                             if node.node in edge.edge.parents:
-                                edges.remove(edge)
-                        nodes.remove(node)
+                                bridgeObj.edges.remove(edge)
+                        bridgeObj.nodes.remove(node)
 
                         # stop after the first hit
                         break
 
                 if debug:
                     debugDeleteLines.clear()
-                for edge in edges:
+                for edge in bridgeObj.edges:
                     # if edge.rect.collidepoint(mousepos):
 
                     # the cursor has intersected the sprite, but is it
@@ -783,6 +880,10 @@ while running:
                     amag = vmag(a)
                     b = vsub(edge.edge.parents[1].location,
                              edge.edge.parents[0].location)
+                    # just in case it's a zero lengthh edge, just remove it
+                    if vmag(b) == 0:
+                        bridgeObj.edges.remove(edge)
+                        break
                     bunit = vunit(b)
                     adotbunit = vdot(a, bunit)
                     d = math.sqrt(max(amag * amag - adotbunit * adotbunit, 0))
@@ -806,12 +907,11 @@ while running:
 
                         # check range
                         if d < 10:
-                            edges.remove(edge)
+                            bridgeObj.edges.remove(edge)
                             # just remove one edge
                             break
 
-                nodeSprites = pygame.sprite.RenderPlain(nodes)
-                edgeSprites = pygame.sprite.RenderPlain(edges)
+                sprites.reloadBridgeSprites(bridgeObj)
 
             if event.key == pygame.K_1:
                 edgeMode = "road"
@@ -820,63 +920,54 @@ while running:
             if event.key == pygame.K_3:
                 edgeMode = "cable"
 
+            if not simulate:
+                if event.key == pygame.K_KP1:
+                    level = 0
+                    loadLevel(levelNames[0], bridgeObj, screen)
+                if event.key == pygame.K_KP2:
+                    level = 1
+                    loadLevel(levelNames[1], bridgeObj, screen)
+                if event.key == pygame.K_KP3:
+                    level = 2
+                    loadLevel(levelNames[2], bridgeObj, screen)
+                if event.key == pygame.K_KP4:
+                    level = 3
+                    loadLevel(levelNames[3], bridgeObj, screen)
+
             if event.key == pygame.K_s and not simulate:
                 # save the bridge
-                jsonBridge = {"nodes": [],
-                              "edges": []}
-
-                for node in nodes:
-                    jsonBridge["nodes"].append(
-                            node.getSerializableObject())
-
-                for edge in edges:
-                    jsonBridge["edges"].append(
-                            edge.getSerializableObject(nodes))
-
+                jsonBridge = serializeBridge(bridgeObj)
+                # open filename menu to prompt for name
                 with open('savedBridge', 'w', encoding="utf-8") as f:
                     f.write(json.dumps(jsonBridge))
 
             if event.key == pygame.K_l and not simulate:
                 # load a bridge from file
                 with open('savedBridge', 'r', encoding="utf-8") as f:
-                    jsonString = f.read()
+                    jsonBridge = json.loads(f.read())
 
-                jsonBridge = json.loads(jsonString)
+                deserializeBridge(jsonBridge, bridgeObj)
 
-                nodes.clear()
-                edges.clear()
-
-                for node in jsonBridge["nodes"]:
-                    nodes.append(NodeGameObject.loadSerializableObject(node))
-
-                for edge in jsonBridge["edges"]:
-                    edges.append(
-                            EdgeGameObject.loadSerializableObject(edge, nodes))
-
-                nodeSprites = pygame.sprite.RenderPlain(nodes)
-                edgeSprites = pygame.sprite.RenderPlain(edges)
-                collidingNode = None
+                bridgeObj.reloadBridge()
+                sprites.reloadBridgeSprites(bridgeObj)
 
             if event.key == pygame.K_r and not simulate:
-                nodes.clear()
-                edges.clear()
-                collidingNode = None
-                connectedEdges = []
-                resetBridge()
-                nodeSprites = pygame.sprite.RenderPlain(nodes)
-                edgeSprites = pygame.sprite.RenderPlain(edges)
+                loadLevel(levelNames[level], bridgeObj, screen)
+
+                bridgeObj.reloadBridge()
+                sprites.reloadBridgeSprites(bridgeObj)
 
             if event.key == pygame.K_SPACE:
                 # clear the last simulation
                 if simulate:
                     simulate = False
 
-                    for node in nodes:
+                    for node in bridgeObj.nodes:
                         node.simulate = False
                         node.node.b2body = None
                         node.updatePosition()
 
-                    for edge in edges:
+                    for edge in bridgeObj.edges:
                         edge.simulate = False
                         edge.edge.joints = []
                         edge.edge.broken = False
@@ -894,10 +985,16 @@ while running:
                     steps = 0
 
                     # rebuild the static ground
-                    anchor1pos = (screen.get_width() / 2 + 75 * 3,
-                                  screen.get_height() / 2 - 2.5)
-                    anchor2pos = (screen.get_width() / 2 - 75 * 3,
-                                  screen.get_height() / 2 - 2.5)
+                    # the -2.5 on y is to make the ground surface level with
+                    # road pieces attached to the ground anchor points
+                    anchor1pos = (screen.get_width() / 2 + 75 * levels[
+                        levelNames[level]][1][0],
+                                  screen.get_height() / 2 - 75 * levels[
+                                  levelNames[level]][1][1] - 2.5)
+                    anchor2pos = (screen.get_width() / 2 + 75 * levels[
+                        levelNames[level]][0][0],
+                                  screen.get_height() / 2 - 75 * levels[
+                                  levelNames[level]][0][1] - 2.5)
                     size = vdiv((
                             (screen.get_width() - anchor1pos[0]) / 2,
                             (screen.get_height() - anchor1pos[1]) / 2), PPM)
@@ -1000,7 +1097,7 @@ while running:
                     box2dBodies.append(wheel2)
 
                     # construct the physics simulation
-                    for node in nodes:
+                    for node in bridgeObj.nodes:
                         # generate a body with circle shape fixed to it for
                         # each node
                         # change of coordinates
@@ -1024,7 +1121,7 @@ while running:
                         # add the body to the list for simulation
                         box2dBodies.append(node.node.b2body)
 
-                    for edge in edges:
+                    for edge in bridgeObj.edges:
                         edge.simulate = True
                         pos1 = pygameToBox2d(edge.edge.parents[0].location)
                         pos2 = pygameToBox2d(edge.edge.parents[1].location)
@@ -1109,19 +1206,18 @@ while running:
 
                 newNode = NodeGameObject(bridge.Node(event.pos))
                 newNode.startMoving()
-                nodes.append(newNode)
-                nodeSprites = pygame.sprite.RenderPlain(nodes)
+                bridgeObj.nodes.append(newNode)
 
                 # check if there are 2 nodes to connect with an edge
-                if len(nodes) > 1:
+                if len(bridgeObj.nodes) > 1:
 
                     # pr.enable()
                     # check if the curror was clicking on an existing node
-                    connectingNode = nodes[-2].node
+                    connectingNode = bridgeObj.nodes[-2].node
 
                     # check for collisions, not including the
                     # moving one(last one)
-                    for node in nodes[0:-2]:
+                    for node in bridgeObj.nodes[0:-2]:
                         if node.rect.collidepoint(event.pos):
                             # if so, make edge between the clicked
                             # on node and new
@@ -1133,50 +1229,50 @@ while running:
                     newEdge = EdgeGameObject(
                         bridge.Edge(
                             (connectingNode,
-                             nodes[-1].node), edgeMode))
+                             bridgeObj.nodes[-1].node), edgeMode))
                     newEdge.startMoving()
-                    edges.append(newEdge)
-
-                    edgeSprites = pygame.sprite.RenderPlain(edges)
+                    bridgeObj.edges.append(newEdge)
 
                     # add to connectedEdges list
-                    connectedEdges = []
-                    connectedEdges.append(newEdge)
-                    calculateNewPosition(event.pos)
+                    bridgeObj.connectedEdges = []
+                    bridgeObj.connectedEdges.append(newEdge)
+                    calculateNewPosition(event.pos, bridgeObj)
 
                     # pr.disable()
 
+                sprites.reloadBridgeSprites(bridgeObj)
+
             if event.button == 3:
                 # right mouse button -> move existing if it's not fixed
-                for node in nodes[:]:
+                for node in bridgeObj.nodes[:]:
                     if node.rect.collidepoint(event.pos) and node.node.type == "movable":
                         # pr.enable()
                         # move node to end of list, and begin moving
-                        nodes.remove(node)
-                        nodes.append(node)
+                        bridgeObj.nodes.remove(node)
+                        bridgeObj.nodes.append(node)
                         node.startMoving()
 
                         # assign each connected edge to moving, and add it to
                         # connectedEdges list
-                        connectedEdges = []
-                        for edge in edges:
+                        bridgeObj.connectedEdges = []
+                        for edge in bridgeObj.edges:
                             if node.node in edge.edge.parents:
                                 edge.startMoving()
-                                connectedEdges.append(edge)
+                                bridgeObj.connectedEdges.append(edge)
 
-                        calculateNewPosition(event.pos)
+                        calculateNewPosition(event.pos, bridgeObj)
                         # pr.disable()
                         break
 
         if event.type == pygame.MOUSEBUTTONUP and not simulate:
-            if len(nodes) > 0:
-                nodeSprites.update()
-                nodes[-1].stopMoving()
-                edgeSprites.update()
-                for edge in edges:
+            if len(bridgeObj.nodes) > 0:
+                sprites.nodeSprites.update()
+                bridgeObj.nodes[-1].stopMoving()
+                sprites.edgeSprites.update()
+                for edge in bridgeObj.edges:
                     edge.stopMoving()
 
-            if collidingNode is not None:
+            if bridgeObj.collidingNode is not None:
                 # if there is a collision to resolve, connect all the edges
                 # currently connected to new node to the collidingNode, then
                 # delete new node, moving collidingNode to front.
@@ -1198,34 +1294,34 @@ while running:
                 uniqueNodes = []
                 # reverse order to give precidence to recent edges for
                 # duplicate resolution
-                edgesReversed = edges[:]
+                edgesReversed = bridgeObj.edges[:]
                 edgesReversed.reverse()
                 for edge in edgesReversed:
-                    if nodes[-1].node in edge.edge.parents:
-                        if collidingNode.node in edge.edge.parents:
+                    if bridgeObj.nodes[-1].node in edge.edge.parents:
+                        if bridgeObj.collidingNode.node in edge.edge.parents:
                             # this is a degenerate case, the two merging nodes
                             # have a connecting edge. Remove this edge.
-                            edges.remove(edge)
+                            bridgeObj.edges.remove(edge)
                             continue
                         else:
                             # re-assign the edge's parents
                             # Also keep track of the other connected Node, to
                             # check for other edges that reference the same
                             # node (other as in not nodes[-1] or collidingNode)
-                            index = edge.edge.parents.index(nodes[-1].node)
+                            index = edge.edge.parents.index(bridgeObj.nodes[-1].node)
                             if index == 0:
-                                edge.edge.parents = (collidingNode.node,
+                                edge.edge.parents = (bridgeObj.collidingNode.node,
                                                      edge.edge.parents[1])
                                 uniqueNode = edge.edge.parents[1]
                             else:
                                 edge.edge.parents = (edge.edge.parents[0],
-                                                     collidingNode.node)
+                                                     bridgeObj.collidingNode.node)
                                 uniqueNode = edge.edge.parents[0]
 
                     # keep track of unique parent nodes to solve for duplicate
                     # edges
-                    elif collidingNode.node in edge.edge.parents:
-                        index = edge.edge.parents.index(collidingNode.node)
+                    elif bridgeObj.collidingNode.node in edge.edge.parents:
+                        index = edge.edge.parents.index(bridgeObj.collidingNode.node)
                         if index == 0:
                             uniqueNode = edge.edge.parents[1]
                         else:
@@ -1247,26 +1343,25 @@ while running:
                         # the first sighting, therfore, delete this
                         # edge since it would otherwise contain the
                         # same parents as a previous, newer edge.
-                        edges.remove(edge)
+                        bridgeObj.edges.remove(edge)
                     else:
                         # hasn't been see yet, so add it to the list
                         uniqueNodes.append(uniqueNode)
 
                 # remove new node, and move collidingNode to the end
-                nodes.remove(collidingNode)
-                nodes.pop()
-                nodes.append(collidingNode)
+                bridgeObj.nodes.remove(bridgeObj.collidingNode)
+                bridgeObj.nodes.pop()
+                bridgeObj.nodes.append(bridgeObj.collidingNode)
 
-                nodeSprites = pygame.sprite.RenderPlain(nodes)
-                edgeSprites = pygame.sprite.RenderPlain(edges)
-                collidingNode = None
+                bridgeObj.reloadBridge()
+                sprites.reloadBridgeSprites(bridgeObj)
 
         if event.type == pygame.MOUSEMOTION and not simulate:
             debugCursor.pos = event.pos
             # check for collisions of mouse with other nodes, default none
-            collidingNode = None
-            if len(nodes) > 0:
-                if nodes[-1].moving:
+            bridgeObj.collidingNode = None
+            if len(bridgeObj.nodes) > 0:
+                if bridgeObj.nodes[-1].moving:
                     # pr.enable()
                     # move the node, check for max edge length for all
                     # connected edges
@@ -1274,15 +1369,15 @@ while running:
                     # check for collisions,
                     # not including the moving one(last one)
                     reachedOtherNode = False
-                    for node in nodes[0:-1]:
+                    for node in bridgeObj.nodes[0:-1]:
                         if node.rect.collidepoint(event.pos):
                             # set location of moving node to collision node
                             # (don't forget to remove the duplication later
                             # and resolve the edges)
                             # set goal position
-                            if calculateNewPosition(node.node.location):
+                            if calculateNewPosition(node.node.location, bridgeObj):
                                 # nodes[-1].node.location = node.node.location
-                                collidingNode = node
+                                bridgeObj.collidingNode = node
                             reachedOtherNode = True
                             # actually, I want to stop on the first hit, and
                             # just put the node as close as possible to it, to
@@ -1293,7 +1388,7 @@ while running:
                     # evaluated false) then calculateNewPosition again against
                     # mouse position as the goal
                     if not reachedOtherNode:
-                        calculateNewPosition(event.pos)
+                        calculateNewPosition(event.pos, bridgeObj)
 
                     # pr.disable()
 
@@ -1307,20 +1402,16 @@ while running:
         pass
 
     # update sprites/game objects
-    carSprite.update()
-    nodeSprites.update()
-    edgeSprites.update(invdt)
+    sprites.carSprite.update()
+    sprites.nodeSprites.update()
+    sprites.edgeSprites.update(invdt)
     if debug:
-        debugCriticalPointsSprites = pygame.sprite.RenderPlain(
-                debugCriticalPoints)
-        debugDeleteLinesSprites = pygame.sprite.RenderPlain(debugDeleteLines)
-        debugSprites.update()
-        debugCriticalPointsSprites.update()
-        debugDeleteLinesSprites.update()
+        sprites.debugSprites.update()
+        sprites.reloadDebugSprites()
 
     # let the simulation settle before breaking stuff
     if steps > 60 * 2 and simulate:
-        for edge in edges:
+        for edge in bridgeObj.edges:
             # check for breakage condition
             if edge.tension > edge.edge.tensileStrength or edge.tension < -edge.edge.compressiveStrength:
                 if not edge.edge.broken:
@@ -1386,20 +1477,20 @@ while running:
                                            radius)
 
     # render using pygame sprites
-    carSprite.draw(screen)
-    edgeSprites.draw(screen)
+    sprites.carSprite.draw(screen)
+    sprites.edgeSprites.draw(screen)
     if not simulate:
-        nodeSprites.draw(screen)
+        sprites.nodeSprites.draw(screen)
 
     if debug:
-        debugSprites.draw(screen)
-        debugCriticalPointsSprites.draw(screen)
-        debugDeleteLinesSprites.draw(screen)
+        sprites.debugSprites.draw(screen)
+        sprites.debugCriticalPointsSprites.draw(screen)
+        sprites.debugDeleteLinesSprites.draw(screen)
 
     # draw the tension/compression forces
     # if simulate and steps > 60 * 2:
     if simulate:
-        for edge in edges:
+        for edge in bridgeObj.edges:
             tension = edge.tension
             edge1pos = box2dToPygame(edge.edge.parents[0].b2body.position)
             edge2pos = box2dToPygame(edge.edge.parents[1].b2body.position)
