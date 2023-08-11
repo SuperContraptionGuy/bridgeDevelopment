@@ -49,11 +49,11 @@ class RegulatoryNetwork:
         else:
             self.w = w
         if b is None:
-            self.b = [3 for x in range(n)]
+            self.b = [1 for x in range(n)]
         else:
             self.b = b
         if k2 is None:
-            self.k2 = [2 for x in range(n)]
+            self.k2 = [1 for x in range(n)]
         else:
             self.k2 = k2
 
@@ -92,11 +92,11 @@ class RegulatoryNetwork:
         if b is not None:
             self.b.append(b)
         else:
-            self.b.append(3)
+            self.b.append(1)
         if k2 is not None:
             self.k2.append(k2)
         else:
-            self.k2.append(2)
+            self.k2.append(1)
 
         if w is not None:
             # first add an entry on the inputs to every other node
@@ -197,8 +197,8 @@ def osscilatingCircuit():
     b = [abs(random.gauss(3, 1)) for i in range(n)]
     k2 = [abs(random.gauss(2, 1)) for i in range(n)]
     k1 = [1 for i in range(n)]
-    b = [3 for i in range(n)]
-    k2 = [2 for i in range(n)]
+    b = [1 for i in range(n)]
+    k2 = [1 for i in range(n)]
     pprint.pprint(w)
     print("..")
     pprint.pprint([k1, b, k2])

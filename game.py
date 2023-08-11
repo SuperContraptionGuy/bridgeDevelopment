@@ -494,6 +494,20 @@ def vrot(a, theta):
     return vmul(u(vangle(a) + theta), vmag(a))
 
 
+def vperp(a):
+    '''
+    get vector perpendicular to given, using right hand rule
+    '''
+    return (-a[1], a[0])
+
+
+def vint(vec):
+    '''
+    return integer representation of vector
+    '''
+    return (int(vec[0]), int(vec[1]))
+
+
 def pygameToBox2d(position):
     """
     switch coordinate systems from pygame pixels to Box2D meters
@@ -1082,8 +1096,416 @@ def bridgeEditorEventHandler(event, bridgeObj, sprites, levelBackground, debug, 
                 # pr.disable()
 
 
-def geneNetworkEventHandler(event):
-    pass
+class GNIstate:
+    '''For managing state variable for input events and editor interface
+    GeneNetworkInterfaceState'''
+    MOUSEDOWNNOCOLLISION = 0
+    MOUSEDOWNPAN = 1
+    NEWEDGE = 2
+    MOUSEDOWNMOVENODE = 3
+    NONE = 4
+    MOUSEHOVERNODE = 5
+    MOUSEHOVEREDGE = 6
+    MOUSEDOWNMOVED = 7
+    NEWEDGEFINISHED = 8
+
+    state = NONE
+    mousePos = (0, 0)
+    mouseDownPos = (0, 0)
+    # begining node of new edge
+    newEdgeStart = 0
+    newEdgeEnd = None
+    newEdgeWeight = 1
+    # node that's being moved
+    movingNode = 0
+
+
+def geneNetworkEventHandler(event, geneNetwork):
+    # basically a node editor for recurrent neural networks to model and
+    # simulate gene regulatory networks
+    #
+    # left click and mouseup no collision no move to add gene (node)
+    # middle click and drag to pan view
+    # mousewheel and no collision to zoom view to/from mouse location
+    # right click drag on node to move
+    # left click drag on node to start edge creation (node to cursor)
+    #   snap to node on hover collide (including starting node, make it curve)
+    #   on mouseup, delete tmp edge unless snapped
+    # right click drag on edge to add curve
+    # left click drag up/down on edge to change weight proportional to value
+    # or mousewheel while hover over edge to change weight
+    # on hover over an edge, display the weight
+    # press x while hovering over node to delete it
+    # press x while hovering over edge to set it to zero (and stop rendering it
+    # press spacebar to play/pause simulation (allow editing during sim)
+    # press r to randomize/zero(+noise) concentrations
+    # mousewheel while hovering over nodes adjusts parameters and
+    # mousewheel while dragging creating a new edge to adjust the weight
+    # concentrations depending on what key is held down
+    #   b is bias - offsets the constituative rate of expression before
+    #       logistic curve is applied, so 0 in centered on .5
+    #   m is max rate - k1 parameter, scales max expression rate
+    #   d is degredation rate constant - k2 parameter for kinetic equation
+    #       of degredation
+    #   no key held down perturbs the concentration. simulation of that node
+    #       is paused until mouse hovers off, so effectively the concentration
+    #       is pinned at some value. (paused, or simply the concentration is
+    #       reset every frame. or something)
+    #       if the f key is pressed during this process, the node is toggled
+    #           to stay fixed until f on hover is pressed again.
+    # on hover over a node, display the concentration value
+    # on hover while one of the above modifyer keys is held down, display
+    #   the appropriate parameter value and name, like "k1=1"
+    if event.type == pygame.MOUSEBUTTONDOWN:
+        GNIstate.mouseDownPos = event.pos
+        GNIstate.mousePos = event.pos
+        # left mouse
+        if event.button == 1:
+            # check for collisions
+            collision = geneNetwork.checkNodeCollision(
+                geneNetwork.screenToCords(event.pos))
+            # if collision with node, start edge creation
+            if collision is not None:
+                # there is a collision, start making a new edge
+                GNIstate.state = GNIstate.NEWEDGE
+                # save colliding node index
+                GNIstate.newEdgeStart = collision
+                GNIstate.newEdgeEnd = collision
+
+            else:
+                # if no collisions, wait for mouse button up
+                # (make sure no mouse move)
+                # to add new node
+                GNIstate.state = GNIstate.MOUSEDOWNNOCOLLISION
+                # if collision with edge, start edge weight adjust
+        elif event.button == 2:
+            # middle mouse
+            GNIstate.state = GNIstate.MOUSEDOWNPAN
+        elif event.button == 3:
+            # right mouse button
+            collision = geneNetwork.checkNodeCollision(
+                geneNetwork.screenToCords(event.pos))
+            if collision is not None:
+                GNIstate.state = GNIstate.MOUSEDOWNMOVENODE
+                GNIstate.movingNode = collision
+        elif event.button == 4:
+            # scroll
+            match GNIstate.state:
+                case GNIstate.NONE:
+                    geneNetwork.zoomTo(1.05,
+                                       geneNetwork.screenToCords(event.pos))
+                case GNIstate.NEWEDGE:
+                    GNIstate.newEdgeWeight += 1
+        elif event.button == 5:
+            match GNIstate.state:
+                case GNIstate.NONE:
+                    geneNetwork.zoomTo(1 / 1.05,
+                                       geneNetwork.screenToCords(event.pos))
+                case GNIstate.NEWEDGE:
+                    GNIstate.newEdgeWeight -= 1
+
+    elif event.type == pygame.MOUSEMOTION:
+        GNIstate.mousePos = event.pos
+        match GNIstate.state:
+            case GNIstate.MOUSEDOWNNOCOLLISION:
+                # cancel create node if mouse moved too far
+                if vmag(vsub(event.pos, GNIstate.mouseDownPos)) > 5:
+                    GNIstate.state = GNIstate.MOUSEDOWNMOVED
+            case GNIstate.MOUSEDOWNPAN:
+                geneNetwork.pan = vsub(geneNetwork.pan,
+                                       vdiv(event.rel, geneNetwork.zoom))
+            case GNIstate.NEWEDGE:
+                # check for collision with other node
+                collision = geneNetwork.checkNodeCollision(
+                    geneNetwork.screenToCords(event.pos))
+                if collision is not None:
+                    # if collision, finalize edge for now
+                    GNIstate.newEdgeEnd = collision
+                else:
+                    # not over another node yet
+                    GNIstate.newEdgeEnd = None
+                    # if not, remove finsih node and set finish position to
+                    # mouse
+                pass
+
+    elif event.type == pygame.MOUSEBUTTONUP:
+        # ignore scroll events or other mouse buttons
+        if event.button == 1 or event.button == 2 or event.button == 3:
+            match GNIstate.state:
+                # check for collisions...
+                case GNIstate.MOUSEDOWNPAN:
+                    # do nothing
+                    GNIstate.state = GNIstate.NONE
+
+                case GNIstate.MOUSEDOWNNOCOLLISION:
+                    GNIstate.state = GNIstate.NONE
+                    # create a node
+                    geneNetwork.addGene(geneNetwork.screenToCords(event.pos))
+
+                case GNIstate.MOUSEDOWNMOVED:
+                    # do nothing
+                    GNIstate.state = GNIstate.NONE
+
+                case GNIstate.NEWEDGE:
+                    GNIstate.state = GNIstate.NONE
+                    if GNIstate.newEdgeEnd is not None:
+                        # set weight for new edge
+                        geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] = GNIstate.newEdgeWeight
+                        # reset new edge weight var
+                        GNIstate.newEdgeWeight = 1
+
+                    else:
+                        # Never intersected finish node, clear the edge
+                        pass
+
+
+class GeneNetwork:
+    # contains all the functions needed for the event handler to interact
+    # with a RegulatoryNetwork object and handles for the pygame loop to
+    # update the simulation and render the information in a useable way
+    #
+    # single cell network.
+    # concentrations
+    # screen positions
+    # renderer for nodes and edges
+    #   pan and zoom transform included for every dimension
+    #   render arrow or flat for positive/negative interaction, and color
+    #   render thickness proportional to weight
+    #   render edges with boundary from originating node
+    #   render nodes as circles, randomized color
+    #       with a red boarder if it's fixed
+    #   render concentrations at each node as
+    #       circle fill in alpha for concentration
+    #       small circle inside with radius equal to concentration
+    #       another ring inside with variable radius for expression Rate
+    # renderer for a graph window, concentrations over time of all the nodes,
+    #   color coded lines
+    # mouse collision check function for nodes and edges
+    # add gene (node) function
+    # add edges (non zero weight) function
+    #   curvable edges for asthetics and self interaction feedback loops
+    #       3 point curve of some kind
+    # modify weights function
+    # run simulation
+    #   ability to fix some concentrations
+
+    node_r = 20
+    node_t = 1.5
+    arrowGap_w = 2
+    arrowTip_l = 7
+    arrowTip_a = math.pi / 5
+    arrowLoopback_a = math.pi * 0.8
+    arrowLoopbackTip_a = math.pi / 3
+
+    def __init__(self):
+        self.n = 0
+        self.z = []
+        self.locs = []
+        self.colors = []
+        self.net = network.RegulatoryNetwork(0)
+
+        self.pan = [0, 0]
+        self.zoom = 1
+        pass
+
+    def addGene(self, loc):
+        self.n += 1
+        # initialize concentration to noisy zero
+        self.z.append(random.random() / 1000000)
+        self.locs.append(loc)
+        # choose random color for the new gene
+        newColor = pygame.Color("Black")
+        newColor.hsva = (random.uniform(0, 360), 80, 50)
+        self.colors.append(newColor)
+        self.net.addGene()
+
+    def cordsToScreen(self, loc):
+        # return vsub(vmul(loc, self.zoom), self.pan)
+        return vmul(vsub(loc, self.pan), self.zoom)
+
+    def screenToCords(self, loc):
+        # return vdiv(vsum(loc, self.pan), self.zoom)
+        return vsum(vdiv(loc, self.zoom), self.pan)
+
+    def zoomTo(self, zoom, loc):
+        panToMouse = vsub(loc, self.pan)
+        # self.pan = vsum(self.pan, vsub(panToMouse, vmul(panToMouse, zoom)))
+        self.pan = vsum(vsub(vmul(panToMouse, zoom), panToMouse), self.pan)
+        geneNetwork.zoom *= zoom
+
+    def checkNodeCollision(self, testPoint):
+        for (i, loc) in enumerate(self.locs):
+            if vmag(vsub(testPoint, loc)) < self.node_r:
+                # testPoint collided with a node
+                return i
+        # if no collision, return None
+        return None
+
+    def update(self):
+        self.net.step(self.z, 0.01)
+
+    def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
+                  width=None,
+                  weight=None):
+        # draw an arrow
+        color = (0, 0, 0)
+        radius = 1
+        angle = self.arrowTip_a
+
+        if endNode is not None:
+            if startNode != endNode:
+                # draw between two given nodes
+                unit = vunit(vsub(self.locs[endNode], self.locs[startNode]))
+                end = vsub(self.locs[endNode],
+                           vmul(unit, self.arrowGap_w + self.node_r))
+            else:
+                angle = self.arrowLoopbackTip_a
+
+            if width is not None:
+                # use given width
+                radius = width
+            if weight is not None:
+                if weight < 0:
+                    angle = math.pi / 2
+                radius = abs((self.net.f(
+                    weight / 10) * 2 - 1) * 5)
+
+            else:
+                # calculate width from weight
+                # if weight is negative, draw flat arrowhead
+                if self.net.w[endNode][startNode] < 0:
+                    angle = math.pi / 2
+                # calculate arrow thickness from weight
+                radius = abs((self.net.f(
+                    self.net.w[endNode][startNode] / 10) * 2 - 1) * 5)
+        else:
+            # draw to the given corrdinate from the given node
+            unit = vunit(vsub(endPos, self.locs[startNode]))
+            end = endPos
+            angle = self.arrowTip_a
+
+        if startNode != endNode:
+            # draw a straight arrow line
+            start = vsum(self.locs[startNode],
+                         vmul(unit, self.arrowGap_w + self.node_r))
+            perpUnit = vperp(unit)
+            pygame.draw.polygon(
+                surface,
+                color,
+                [vint(self.cordsToScreen(
+                    vsum(start, vmul(perpUnit, radius)))),
+                 vint(self.cordsToScreen(
+                     vsum(start, vmul(perpUnit, -radius)))),
+                 vint(self.cordsToScreen(
+                     vsum(end, vmul(perpUnit, -radius)))),
+                 vint(self.cordsToScreen(
+                     vsum(end, vmul(perpUnit, radius))))])
+
+        else:
+            # draw a curved arrow line
+            # overwrite unit and end so the arrow heads draw in the right place
+            # this section is a mess
+
+            unit = vrot(u(math.pi / 2), -self.arrowLoopback_a + math.pi)
+            perpUnit = vperp(unit)
+            # this end point would be correct after I finish the arc calculator
+            # end = vsum(vsum(vmul(unit, -(self.node_r + self.arrowGap_w)),
+            #                 vmul(perpUnit, -radius)),
+            #            self.locs[endNode])
+
+            arcRadius = self.node_r * 0.5
+            arcRect = pygame.Rect(0, 0,
+                                  arcRadius * 2 * self.zoom,
+                                  arcRadius * 2 * self.zoom)
+            arcRect.center = self.cordsToScreen(
+                vsum(vmul(u(-math.pi / 2 + math.pi / 8),
+                          self.node_r * 1.2),
+                     self.locs[endNode]))
+            end = vsum(self.screenToCords(arcRect.center),
+                       vmul(u(math.pi - self.arrowLoopback_a),
+                            arcRadius - radius))
+            pygame.draw.arc(surface, color,
+                            arcRect,
+                            -(math.pi - self.arrowLoopback_a),
+                            math.pi,
+                            max(int(radius * 2 * self.zoom), 1))
+
+        # draw arrow heads
+        aunit = vrot(unit, math.pi - angle)
+        perpaunit = vperp(aunit)
+        pygame.draw.polygon(
+            surface,
+            color,
+            [vint(self.cordsToScreen(
+                vsum(end, vmul(perpUnit, radius)))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(
+                    vmul(aunit, self.arrowTip_l),
+                    vmul(perpUnit, radius))))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(vsum(
+                    vmul(aunit, self.arrowTip_l),
+                    vmul(perpaunit, radius * 2)),
+                                vmul(perpUnit, radius))))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(vmul(perpUnit, radius),
+                                vmul(perpaunit, radius * 2)))))])
+        aunit = vrot(unit, -(math.pi - angle))
+        perpaunit = vperp(aunit)
+        pygame.draw.polygon(
+            surface,
+            color,
+            [vint(self.cordsToScreen(
+                vsum(end, vmul(perpUnit, -radius)))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(
+                    vmul(aunit, self.arrowTip_l),
+                    vmul(perpUnit, -radius))))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(vsum(
+                    vmul(aunit, self.arrowTip_l),
+                    vmul(perpaunit, -radius * 2)),
+                                vmul(perpUnit, -radius))))),
+             vint(self.cordsToScreen(
+                 vsum(end, vsum(vmul(perpUnit, -radius),
+                                vmul(perpaunit, -radius * 2)))))])
+
+    def render(self, surface):
+        # draw nodes
+        for i in range(self.n):
+            pygame.draw.circle(surface,
+                               self.colors[i],
+                               vint(self.cordsToScreen(self.locs[i])),
+                               int(self.node_r * self.zoom),
+                               max(int(self.node_t * self.zoom), 1))
+            # draw concentration indicator
+            pygame.draw.circle(surface,
+                               self.colors[i],
+                               vint(self.cordsToScreen(self.locs[i])),
+                               int(
+                                self.z[i] * self.node_r * 0.9 * self.zoom))
+
+
+            # draw edges
+            for j in range(self.n):
+                # for each edge into node i, draw if weight is not 0
+                if self.net.w[i][j] != 0:
+                    # draw an arrow
+                    self.drawArrow(surface, j, i)
+
+        # draw new edge
+        if GNIstate.state == GNIstate.NEWEDGE:
+            if GNIstate.newEdgeEnd is not None:
+                # over another node draw to other node
+                self.drawArrow(surface,
+                               GNIstate.newEdgeStart,
+                               GNIstate.newEdgeEnd,
+                               weight=GNIstate.newEdgeWeight)
+            else:
+                # not over another node, draw to cursor
+                self.drawArrow(surface,
+                               GNIstate.newEdgeStart,
+                               endPos=self.screenToCords(GNIstate.mousePos))
 
 
 def stopBridgeSimulation(world, bridgeObj, SimulatorVars):
@@ -1539,8 +1961,8 @@ interfaceStates = {"bridgeEdit":            0,
                    "bridgeSimulate":        1,
                    "geneNetworkSimulate":   2
                    }
-interfaceState = interfaceStates["bridgeEdit"]
-# interfaceState = interfaceStates["geneNetworkSimulate"]
+# interfaceState = interfaceStates["bridgeEdit"]
+interfaceState = interfaceStates["geneNetworkSimulate"]
 
 bridgeObj = BridgeObject()
 
@@ -1551,7 +1973,10 @@ geneNetworkBackground = pygame.Surface(screen.get_size())
 levelBackground = pygame.Surface(screen.get_size())
 
 loadLevel(levelNames[0], bridgeObj, levelBackground, screen)
-geneNetworkBackground.fill((161, 197, 224))
+# geneNetworkBackground.fill((161, 197, 224))
+geneNetworkBackground.fill((255, 255, 255))
+
+geneNetwork = GeneNetwork()
 
 
 # --- pybox2d world setup ---
@@ -1586,7 +2011,7 @@ while running:
                                      debug,
                                      EditorVars)
         elif interfaceState == interfaceStates['geneNetworkSimulate']:
-            geneNetworkEventHandler(event)
+            geneNetworkEventHandler(event, geneNetwork)
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F3:
@@ -1623,6 +2048,8 @@ while running:
         # Make Box2D simulate the physics of our world for one step.
         world.Step(TIME_STEP, 30, 30)
         SimulatorVars.steps += 1
+    elif interfaceState == interfaceStates["geneNetworkSimulate"]:
+        geneNetwork.update()
 
     # Render to the screen
 
@@ -1654,6 +2081,7 @@ while running:
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         # clear the screen
         screen.blit(geneNetworkBackground, (0, 0))
+        geneNetwork.render(screen)
 
     # Flip buffers
     pygame.display.flip()
