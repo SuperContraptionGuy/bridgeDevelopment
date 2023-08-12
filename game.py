@@ -1118,6 +1118,7 @@ class GNIstate:
     newEdgeWeight = 1
     # node that's being moved
     movingNode = 0
+    movingNodeOffset = (0, 0)
 
 
 def geneNetworkEventHandler(event, geneNetwork):
@@ -1156,7 +1157,16 @@ def geneNetworkEventHandler(event, geneNetwork):
     # on hover over a node, display the concentration value
     # on hover while one of the above modifyer keys is held down, display
     #   the appropriate parameter value and name, like "k1=1"
-    if event.type == pygame.MOUSEBUTTONDOWN:
+    if event.type == pygame.KEYDOWN:
+        match event.key:
+            case pygame.K_x:
+                # delete a node if hovering
+                collision = geneNetwork.checkNodeCollision(
+                    geneNetwork.screenToCords(pygame.mouse.get_pos()))
+                if collision is not None:
+                    geneNetwork.removeGene(collision)
+
+    elif event.type == pygame.MOUSEBUTTONDOWN:
         GNIstate.mouseDownPos = event.pos
         GNIstate.mousePos = event.pos
         # left mouse
@@ -1188,6 +1198,11 @@ def geneNetworkEventHandler(event, geneNetwork):
             if collision is not None:
                 GNIstate.state = GNIstate.MOUSEDOWNMOVENODE
                 GNIstate.movingNode = collision
+                # store mouse offset from node center
+                GNIstate.movingNodeOffset = vsub(
+                    geneNetwork.locs[collision],
+                    geneNetwork.screenToCords(event.pos))
+
         elif event.button == 4:
             # scroll
             match GNIstate.state:
@@ -1227,6 +1242,10 @@ def geneNetworkEventHandler(event, geneNetwork):
                     # if not, remove finsih node and set finish position to
                     # mouse
                 pass
+            case GNIstate.MOUSEDOWNMOVENODE:
+                geneNetwork.locs[GNIstate.movingNode] = vsum(
+                    geneNetwork.screenToCords(event.pos),
+                    GNIstate.movingNodeOffset)
 
     elif event.type == pygame.MOUSEBUTTONUP:
         # ignore scroll events or other mouse buttons
@@ -1257,6 +1276,8 @@ def geneNetworkEventHandler(event, geneNetwork):
                     else:
                         # Never intersected finish node, clear the edge
                         pass
+                case GNIstate.MOUSEDOWNMOVENODE:
+                    GNIstate.state = GNIstate.NONE
 
 
 class GeneNetwork:
@@ -1280,6 +1301,11 @@ class GeneNetwork:
     #       another ring inside with variable radius for expression Rate
     # renderer for a graph window, concentrations over time of all the nodes,
     #   color coded lines
+    # maybe some bars for the other parameters?
+    #   pre degradation expression rate bar
+    #   degredation rate bar
+    #   total expression rate bar
+    #   
     # mouse collision check function for nodes and edges
     # add gene (node) function
     # add edges (non zero weight) function
@@ -1314,10 +1340,17 @@ class GeneNetwork:
         self.z.append(random.random() / 1000000)
         self.locs.append(loc)
         # choose random color for the new gene
-        newColor = pygame.Color("Black")
+        newColor = pygame.Color((0, 0, 0))
         newColor.hsva = (random.uniform(0, 360), 80, 50)
         self.colors.append(newColor)
         self.net.addGene()
+
+    def removeGene(self, i):
+        self.n -= 1
+        self.z.pop(i)
+        self.locs.pop(i)
+        self.colors.pop(i)
+        self.net.removeGene(i)
 
     def cordsToScreen(self, loc):
         # return vsub(vmul(loc, self.zoom), self.pan)
@@ -1341,14 +1374,16 @@ class GeneNetwork:
         # if no collision, return None
         return None
 
-    def update(self):
-        self.net.step(self.z, 0.01)
+    def checkEdgeCollision(self, testPoint):
+        pass
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
-                  weight=None):
+                  weight=None,
+                  color=None):
         # draw an arrow
-        color = (0, 0, 0)
+        if color is None:
+            color = (0, 0, 0)
         radius = 1
         angle = self.arrowTip_a
 
@@ -1361,28 +1396,29 @@ class GeneNetwork:
             else:
                 angle = self.arrowLoopbackTip_a
 
-            if width is not None:
-                # use given width
-                radius = width
-            if weight is not None:
-                if weight < 0:
-                    angle = math.pi / 2
-                radius = abs((self.net.f(
-                    weight / 10) * 2 - 1) * 5)
-
-            else:
-                # calculate width from weight
-                # if weight is negative, draw flat arrowhead
-                if self.net.w[endNode][startNode] < 0:
-                    angle = math.pi / 2
-                # calculate arrow thickness from weight
-                radius = abs((self.net.f(
-                    self.net.w[endNode][startNode] / 10) * 2 - 1) * 5)
+            # calculate width from weight
+            # if weight is negative, draw flat arrowhead
+            if self.net.w[endNode][startNode] < 0:
+                angle = math.pi / 2
+            # calculate arrow thickness from weight
+            radius = abs((self.net.f(
+                self.net.w[endNode][startNode] / 10) * 2 - 1) * 5)
         else:
             # draw to the given corrdinate from the given node
             unit = vunit(vsub(endPos, self.locs[startNode]))
             end = endPos
-            angle = self.arrowTip_a
+
+        # override radius if width or weight ar set
+        if width is not None:
+            # use given width
+            radius = width
+        if weight is not None:
+            if weight < 0:
+                angle = math.pi / 2
+            else:
+                angle = self.arrowTip_a
+            radius = abs((self.net.f(
+                weight / 10) * 2 - 1) * 5)
 
         if startNode != endNode:
             # draw a straight arrow line
@@ -1470,6 +1506,9 @@ class GeneNetwork:
                  vsum(end, vsum(vmul(perpUnit, -radius),
                                 vmul(perpaunit, -radius * 2)))))])
 
+    def update(self):
+        self.net.step(self.z, 0.01)
+
     def render(self, surface):
         # draw nodes
         for i in range(self.n):
@@ -1485,7 +1524,6 @@ class GeneNetwork:
                                int(
                                 self.z[i] * self.node_r * 0.9 * self.zoom))
 
-
             # draw edges
             for j in range(self.n):
                 # for each edge into node i, draw if weight is not 0
@@ -1495,17 +1533,28 @@ class GeneNetwork:
 
         # draw new edge
         if GNIstate.state == GNIstate.NEWEDGE:
+            # new edge color
+            if GNIstate.newEdgeWeight == 0:
+                color = (255, 0, 0)
+                weight = 1
+            else:
+                color = (0, 255, 0)
+                weight = GNIstate.newEdgeWeight
+
             if GNIstate.newEdgeEnd is not None:
                 # over another node draw to other node
                 self.drawArrow(surface,
                                GNIstate.newEdgeStart,
                                GNIstate.newEdgeEnd,
-                               weight=GNIstate.newEdgeWeight)
+                               weight=weight,
+                               color=color)
             else:
                 # not over another node, draw to cursor
                 self.drawArrow(surface,
                                GNIstate.newEdgeStart,
-                               endPos=self.screenToCords(GNIstate.mousePos))
+                               endPos=self.screenToCords(GNIstate.mousePos),
+                               weight=weight,
+                               color=color)
 
 
 def stopBridgeSimulation(world, bridgeObj, SimulatorVars):
