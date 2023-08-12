@@ -1113,12 +1113,14 @@ class GNIstate:
     mousePos = (0, 0)
     mouseDownPos = (0, 0)
     # begining node of new edge
-    newEdgeStart = 0
+    newEdgeStart = None
     newEdgeEnd = None
     newEdgeWeight = 1
+    newEdge = None
     # node that's being moved
     movingNode = 0
     movingNodeOffset = (0, 0)
+    hoveringNode = None
 
 
 def geneNetworkEventHandler(event, geneNetwork):
@@ -1142,6 +1144,8 @@ def geneNetworkEventHandler(event, geneNetwork):
     # press r to randomize/zero(+noise) concentrations
     # mousewheel while hovering over nodes adjusts parameters and
     # mousewheel while dragging creating a new edge to adjust the weight
+    # after new edge is created, while mouse is hovering over the end node,
+    #   scrolling the mousewheel adjusts the weight of the new edge
     # concentrations depending on what key is held down
     #   b is bias - offsets the constituative rate of expression before
     #       logistic curve is applied, so 0 in centered on .5
@@ -1158,29 +1162,36 @@ def geneNetworkEventHandler(event, geneNetwork):
     # on hover while one of the above modifyer keys is held down, display
     #   the appropriate parameter value and name, like "k1=1"
     if event.type == pygame.KEYDOWN:
-        match event.key:
-            case pygame.K_x:
-                # delete a node if hovering
-                collision = geneNetwork.checkNodeCollision(
-                    geneNetwork.screenToCords(pygame.mouse.get_pos()))
-                if collision is not None:
-                    geneNetwork.removeGene(collision)
+        GNIstate.mousePos = pygame.mouse.get_pos()
+        collision = geneNetwork.checkNodeCollision(
+            geneNetwork.screenToCords(GNIstate.mousePos))
+        GNIstate.hoveringNode = collision
+
+        match GNIstate.state:
+            case GNIstate.NONE:
+                match event.key:
+                    case pygame.K_x:
+                        # delete a node if hovering
+                        if GNIstate.hoveringNode is not None:
+                            geneNetwork.removeGene(GNIstate.hoveringNode)
 
     elif event.type == pygame.MOUSEBUTTONDOWN:
+        GNIstate.mousePos = event.pos
+        collision = geneNetwork.checkNodeCollision(
+            geneNetwork.screenToCords(event.pos))
+        GNIstate.hoveringNode = collision
+
         GNIstate.mouseDownPos = event.pos
         GNIstate.mousePos = event.pos
         # left mouse
         if event.button == 1:
-            # check for collisions
-            collision = geneNetwork.checkNodeCollision(
-                geneNetwork.screenToCords(event.pos))
             # if collision with node, start edge creation
-            if collision is not None:
+            if GNIstate.hoveringNode is not None:
                 # there is a collision, start making a new edge
                 GNIstate.state = GNIstate.NEWEDGE
                 # save colliding node index
-                GNIstate.newEdgeStart = collision
-                GNIstate.newEdgeEnd = collision
+                GNIstate.newEdgeStart = GNIstate.hoveringNode
+                GNIstate.newEdgeEnd = GNIstate.hoveringNode
 
             else:
                 # if no collisions, wait for mouse button up
@@ -1193,34 +1204,89 @@ def geneNetworkEventHandler(event, geneNetwork):
             GNIstate.state = GNIstate.MOUSEDOWNPAN
         elif event.button == 3:
             # right mouse button
-            collision = geneNetwork.checkNodeCollision(
-                geneNetwork.screenToCords(event.pos))
-            if collision is not None:
+            if GNIstate.hoveringNode is not None:
                 GNIstate.state = GNIstate.MOUSEDOWNMOVENODE
-                GNIstate.movingNode = collision
+                GNIstate.movingNode = GNIstate.hoveringNode
                 # store mouse offset from node center
                 GNIstate.movingNodeOffset = vsub(
-                    geneNetwork.locs[collision],
+                    geneNetwork.locs[GNIstate.hoveringNode],
                     geneNetwork.screenToCords(event.pos))
 
         elif event.button == 4:
             # scroll
             match GNIstate.state:
                 case GNIstate.NONE:
-                    geneNetwork.zoomTo(1.05,
-                                       geneNetwork.screenToCords(event.pos))
+                    if GNIstate.hoveringNode is not None:
+                        # change some parameter if modifier is held, else, zoom
+                        keys = pygame.key.get_pressed()
+                        if keys[pygame.K_b]:
+                            # adjust bias
+                            geneNetwork.net.b[GNIstate.hoveringNode] += 0.1
+                        elif keys[pygame.K_m]:
+                            # adjust k1
+                            geneNetwork.net.k1[GNIstate.hoveringNode] += 0.1
+                        elif keys[pygame.K_d]:
+                            # adjust k2
+                            geneNetwork.net.k2[GNIstate.hoveringNode] += 0.1
+                        else:
+                            # if no keys pressed, zoom.
+                            geneNetwork.zoomTo(1.05,
+                                               geneNetwork.screenToCords(
+                                                event.pos))
+                    else:
+                        # if not hovering over node, zoom
+                        geneNetwork.zoomTo(1.05,
+                                           geneNetwork.screenToCords(
+                                            event.pos))
                 case GNIstate.NEWEDGE:
                     GNIstate.newEdgeWeight += 1
+
+                case GNIstate.NEWEDGEFINISHED:
+                    # in this case, mousewheel means adjust weight of edge
+                    geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] += 0.1
+
         elif event.button == 5:
             match GNIstate.state:
                 case GNIstate.NONE:
-                    geneNetwork.zoomTo(1 / 1.05,
-                                       geneNetwork.screenToCords(event.pos))
+                    if GNIstate.hoveringNode is not None:
+                        # change some parameter if modifier is held, else, zoom
+                        keys = pygame.key.get_pressed()
+                        if keys[pygame.K_b]:
+                            # adjust bias
+                            geneNetwork.net.b[GNIstate.hoveringNode] -= 0.1
+                        elif keys[pygame.K_m]:
+                            # adjust k1, clamp positive
+                            geneNetwork.net.k1[GNIstate.hoveringNode] = max(
+                                geneNetwork.net.k1[GNIstate.hoveringNode] - 0.1,
+                                0)
+                        elif keys[pygame.K_d]:
+                            # adjust k2, clamp positive
+                            geneNetwork.net.k2[GNIstate.hoveringNode] = max(
+                                geneNetwork.net.k2[GNIstate.hoveringNode] - 0.1,
+                                0)
+                        else:
+                            # if no keys pressed, zoom.
+                            geneNetwork.zoomTo(1 / 1.05,
+                                               geneNetwork.screenToCords(
+                                                event.pos))
+                    else:
+                        # if not hovering over node, zoom
+                        geneNetwork.zoomTo(1 / 1.05,
+                                           geneNetwork.screenToCords(
+                                            event.pos))
                 case GNIstate.NEWEDGE:
                     GNIstate.newEdgeWeight -= 1
 
+                case GNIstate.NEWEDGEFINISHED:
+                    # in this case, mousewheel means adjust weight of edge
+                    geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] -= 0.1
+
     elif event.type == pygame.MOUSEMOTION:
         GNIstate.mousePos = event.pos
+        collision = geneNetwork.checkNodeCollision(
+            geneNetwork.screenToCords(event.pos))
+        GNIstate.hoveringNode = collision
+
         match GNIstate.state:
             case GNIstate.MOUSEDOWNNOCOLLISION:
                 # cancel create node if mouse moved too far
@@ -1231,23 +1297,40 @@ def geneNetworkEventHandler(event, geneNetwork):
                                        vdiv(event.rel, geneNetwork.zoom))
             case GNIstate.NEWEDGE:
                 # check for collision with other node
-                collision = geneNetwork.checkNodeCollision(
-                    geneNetwork.screenToCords(event.pos))
-                if collision is not None:
-                    # if collision, finalize edge for now
-                    GNIstate.newEdgeEnd = collision
-                else:
-                    # not over another node yet
-                    GNIstate.newEdgeEnd = None
-                    # if not, remove finsih node and set finish position to
-                    # mouse
-                pass
+                # if collision, finalize edge for now
+                # not over another node yet
+                # if not, remove finsih node and set finish position to
+                # mouse
+                GNIstate.newEdgeEnd = GNIstate.hoveringNode
+
             case GNIstate.MOUSEDOWNMOVENODE:
                 geneNetwork.locs[GNIstate.movingNode] = vsum(
                     geneNetwork.screenToCords(event.pos),
                     GNIstate.movingNodeOffset)
 
+            case GNIstate.NEWEDGEFINISHED:
+                if GNIstate.hoveringNode is not None:
+                    # see if we're still hovering over new node parent
+                    if GNIstate.hoveringNode == GNIstate.newEdgeEnd:
+                        # still hovering over new node, just wait
+                        pass
+                    else:
+                        # stop newedgefinished
+                        GNIstate.state = GNIstate.NONE
+                        GNIstate.newEdgeEnd = None
+                        GNIstate.newEdgeStart = None
+                else:
+                    # stop newedgefinished
+                    GNIstate.state = GNIstate.NONE
+                    GNIstate.newEdgeEnd = None
+                    GNIstate.newEdgeStart = None
+
     elif event.type == pygame.MOUSEBUTTONUP:
+        GNIstate.mousePos = event.pos
+        collision = geneNetwork.checkNodeCollision(
+            geneNetwork.screenToCords(event.pos))
+        GNIstate.hoveringNode = collision
+
         # ignore scroll events or other mouse buttons
         if event.button == 1 or event.button == 2 or event.button == 3:
             match GNIstate.state:
@@ -1266,16 +1349,18 @@ def geneNetworkEventHandler(event, geneNetwork):
                     GNIstate.state = GNIstate.NONE
 
                 case GNIstate.NEWEDGE:
-                    GNIstate.state = GNIstate.NONE
                     if GNIstate.newEdgeEnd is not None:
                         # set weight for new edge
                         geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] = GNIstate.newEdgeWeight
                         # reset new edge weight var
                         GNIstate.newEdgeWeight = 1
+                        # GNIstate.newEdgeEnd = None
+                        # GNIstate.newEdgeStart = None
+                        GNIstate.state = GNIstate.NEWEDGEFINISHED
 
                     else:
                         # Never intersected finish node, clear the edge
-                        pass
+                        GNIstate.state = GNIstate.NONE
                 case GNIstate.MOUSEDOWNMOVENODE:
                     GNIstate.state = GNIstate.NONE
 
@@ -1562,6 +1647,9 @@ class GeneNetwork:
             sum = self.net.b[i]
             length = self.net.b[i] * self.indicators_z_scale * self.zoom
             width = self.indicators_w * self.zoom
+            if length < 0:
+                # if negative, offset b bar down
+                origin = vsum(origin, (0, width))
             # end = vsum(origin, (0, -length))
             end = vsum(origin, (length, 0))
             pygame.draw.polygon(surface,
@@ -1570,6 +1658,9 @@ class GeneNetwork:
                                  vint(vsum(origin, (0, -width))),
                                  vint(vsum(end, (0, -width))),
                                  vint(end)])
+            if length < 0:
+                # re-offset up
+                end = vsum(end, (0, -width))
             indicators = []
             # also draw edges
             for j in range(self.n):
@@ -1662,7 +1753,7 @@ class GeneNetwork:
                 fi.append(vsum(self.cordsToScreen(
                     vsum(
                         self.locs[i],
-                        (p[0], -p[1]))),
+                        (p[0], -p[1] * self.net.k1[i]))),
                                (-self.indicatorSigmoid_w / 2 * self.zoom, 0)))
             pygame.draw.lines(surface,
                               pygame.Color("Black"),
