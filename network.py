@@ -22,6 +22,8 @@ class RegulatoryNetwork:
     The idea is that one network is reused many times to simulate multiple
     cells with different morphogen concentration profiles.
     '''
+    # max value for x in expression e^x
+    EXP_MAX = math.floor(math.log(sys.float_info.max))
 
     def __init__(self,
                  n,
@@ -40,6 +42,7 @@ class RegulatoryNetwork:
         '''
         # initalize internal neural network parameters
         self.n = n
+        self.edgeList = {}
         if k1 is None:
             self.k1 = [1 for x in range(n)]
         else:
@@ -57,8 +60,26 @@ class RegulatoryNetwork:
         else:
             self.k2 = k2
 
-    def modifyWeight(self, j, i, wij):
+    def setWeight(self, i, j, wij):
+        # set the weight with parents j, i
+        # and maintain the edge list for fast looping
         # change weight of edge directed from node j to node i
+        if self.w[i][j] == 0:
+            if wij == 0:
+                # no change
+                pass
+            else:
+                # adding new weight
+                self.edgeList.update([((i, j), wij)])
+                pass
+        elif wij == 0:
+            # deleting weight
+            del self.edgeList[(i, j)]
+            pass
+        else:
+            # just changing the weight
+            self.edgeList.update([((i, j), wij)])
+
         self.w[i][j] = wij
         # some possible mutations using this function:
         # • randomize proportional to current value. This modifies the strength
@@ -68,6 +89,13 @@ class RegulatoryNetwork:
         # • setting small weights to zero, breaking weak iteractions
         # • set weight to some small number besides zero if it was already
         # zero, making a new interaction
+
+        # probably would be much faster to store a list of edges
+        # with a reference to their parent's index values and it's
+        # weight
+
+    def getWeight(self, i, j):
+        return self.w[i][j]
 
     def addGene(self,
                 k1=None,
@@ -92,45 +120,71 @@ class RegulatoryNetwork:
         if b is not None:
             self.b.append(b)
         else:
-            self.b.append(1)
+            self.b.append(0)
         if k2 is not None:
             self.k2.append(k2)
         else:
             self.k2.append(1)
 
-        if w is not None:
+        # fill with zeros, no connections between the old nodes and the
+        # new nodes, blank slate
+        for i in range(self.n-1):
+            self.w[i].append(0)
+        self.w.append([0 for i in range(self.n)])
+
+        # then modify w and weightList using setWeight() and the new data if
+        # there is any
+        if w is not None and w2 is not None:
             # first add an entry on the inputs to every other node
             for (i, w2i) in enumerate(w2):
-                self.w[i].append(w2i)
+                # self.w[i].append(w2i)
+                self.setWeight(i, self.n - 1, w2i)
             # then add an entire row of inputs for the new node
-            self.w.append(w)
-        else:
-            # fill with zeros, no connections between the old nodes and the
-            # new nodes
-            for i in range(self.n-1):
-                self.w[i].append(0)
-            self.w.append([0 for i in range(self.n)])
+            # self.w.append(w)
+            for (j, wi) in enumerate(w):
+                self.setWeight(self.n - 1, j, wi)
 
     def removeGene(self, i):
         '''Remove gene i'''
         if self.n > 0:
-            self.n -= 1
 
             self.k1.pop(i)
             self.b.pop(i)
             self.k2.pop(i)
 
             # remove the input from gene i from all other nodes
-            for j in self.w:
-                j.pop(i)
-                # does this work? TODO
+            for jl in self.w:
+                # modify the weight list for inputs from i
+                jl.pop(i)
+
             # remove entire row on inputs for i
             self.w.pop(i)
+            # entire edge list must be re-keyed since all indexes changed.
+
+            newEdges = []
+            for (parents, weight) in self.edgeList.items():
+                newParent1 = parents[0]
+                newParent2 = parents[1]
+                # make sure this edge is not being deleted.
+                if parents[0] != i and parents[1] != i:
+                    if parents[0] > i:
+                        # this parent was moved. The index is now one less
+                        newParent1 -= 1
+                    if parents[1] > i:
+                        newParent2 -= 1
+
+                    # only add the edge if it's not deleted
+                    newEdges.append(((newParent1, newParent2),
+                                 weight))
+
+            self.n -= 1
+            # Update edgeList to contain the new keys
+            self.edgeList = dict(newEdges)
 
     def f(self, x):
         '''Sigmoidal function'''
         # make sure to avoid Overflow errors
-        if -x > math.floor(math.log(sys.float_info.max)):
+        if -x > self.EXP_MAX:
             return 0
 
         # Transfer function, sigmoidal function
@@ -148,18 +202,27 @@ class RegulatoryNetwork:
 
         # calculate the expression rates based on all concentrations and
         # connection weights
+        g = [self.b[x] for x in range(self.n)]
+        # for each edge, calculate the sum of effect it has on each output i
+        # using the more efficient edgeList dictionary
+        for (parents, weight) in self.edgeList.items():
+            g[parents[0]] += weight * z[parents[1]]
+
         dz = [0 for x in range(self.n)]
         # for each output node i, calculate rate of change of concentration
         for (i, zi) in enumerate(z):
             # bias vector
-            gi = self.b[i]
+            # gi = self.b[i]
             # for each input node j, sum the effect it has on output i
-            for (j, zj) in enumerate(z):
+            # for (j, zj) in enumerate(z):
                 # maybe this if will make it a little bit faster
-                if self.w[i][j] != 0:
-                    gi += self.w[i][j] * zj
+                # probably would be much faster to store a list of edges
+                # with a reference to their parent's index values and it's
+                # weight
+                # if self.w[i][j] != 0:
+                    # gi += self.w[i][j] * zj
 
-            dz[i] = self.k1[i] * self.f(gi) - self.k2[i] * zi
+            dz[i] = self.k1[i] * self.f(g[i]) - self.k2[i] * zi
 
         return dz
 

@@ -1170,10 +1170,34 @@ def geneNetworkEventHandler(event, geneNetwork):
         match GNIstate.state:
             case GNIstate.NONE:
                 match event.key:
+
                     case pygame.K_x:
                         # delete a node if hovering
                         if GNIstate.hoveringNode is not None:
                             geneNetwork.removeGene(GNIstate.hoveringNode)
+                            GNIstate.hoveringNode = None
+
+                    case pygame.K_i:
+                        # change state of indicators for node if hovering
+                        if GNIstate.hoveringNode is not None:
+                            geneNetwork.displayIndicators[
+                                GNIstate.hoveringNode] = not geneNetwork.displayIndicators[
+                                GNIstate.hoveringNode]
+
+            case GNIstate.NEWEDGEFINISHED:
+                match event.key:
+
+                    case pygame.K_x:
+                        # also delete the node, but be careful to clean up new
+                        # edge state variables
+                        if GNIstate.hoveringNode is not None:
+                            geneNetwork.removeGene(GNIstate.hoveringNode)
+                            GNIstate.hoveringNode = None
+                            GNIstate.newEdgeStart = None
+                            GNIstate.newEdgeEnd = None
+                            GNIstate.newEdgeWeight = 1
+                            GNIstate.newEdge = None
+                            GNIstate.state = GNIstate.NONE
 
     elif event.type == pygame.MOUSEBUTTONDOWN:
         GNIstate.mousePos = event.pos
@@ -1243,7 +1267,25 @@ def geneNetworkEventHandler(event, geneNetwork):
 
                 case GNIstate.NEWEDGEFINISHED:
                     # in this case, mousewheel means adjust weight of edge
-                    geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] += 0.1
+                    # change some parameter if modifier is held, else, weight
+                    keys = pygame.key.get_pressed()
+                    if keys[pygame.K_b]:
+                        # adjust bias
+                        geneNetwork.net.b[GNIstate.hoveringNode] += 0.1
+                    elif keys[pygame.K_m]:
+                        # adjust k1
+                        geneNetwork.net.k1[GNIstate.hoveringNode] += 0.1
+                    elif keys[pygame.K_d]:
+                        # adjust k2
+                        geneNetwork.net.k2[GNIstate.hoveringNode] += 0.1
+                    else:
+                        # geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] += 0.1
+                        geneNetwork.net.setWeight(
+                            GNIstate.newEdgeEnd,
+                            GNIstate.newEdgeStart,
+                            geneNetwork.net.getWeight(
+                                GNIstate.newEdgeEnd,
+                                GNIstate.newEdgeStart) + 0.1)
 
         elif event.button == 5:
             match GNIstate.state:
@@ -1279,7 +1321,29 @@ def geneNetworkEventHandler(event, geneNetwork):
 
                 case GNIstate.NEWEDGEFINISHED:
                     # in this case, mousewheel means adjust weight of edge
-                    geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] -= 0.1
+                    # change some parameter if modifier is held, else, weight
+                    keys = pygame.key.get_pressed()
+                    if keys[pygame.K_b]:
+                        # adjust bias
+                        geneNetwork.net.b[GNIstate.hoveringNode] -= 0.1
+                    elif keys[pygame.K_m]:
+                        # adjust k1, clamp positive
+                        geneNetwork.net.k1[GNIstate.hoveringNode] = max(
+                            geneNetwork.net.k1[GNIstate.hoveringNode] - 0.1,
+                            0)
+                    elif keys[pygame.K_d]:
+                        # adjust k2, clamp positive
+                        geneNetwork.net.k2[GNIstate.hoveringNode] = max(
+                            geneNetwork.net.k2[GNIstate.hoveringNode] - 0.1,
+                            0)
+                    else:
+                        # geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] -= 0.1
+                        geneNetwork.net.setWeight(
+                            GNIstate.newEdgeEnd,
+                            GNIstate.newEdgeStart,
+                            geneNetwork.net.getWeight(
+                                GNIstate.newEdgeEnd,
+                                GNIstate.newEdgeStart) - 0.1)
 
     elif event.type == pygame.MOUSEMOTION:
         GNIstate.mousePos = event.pos
@@ -1342,7 +1406,10 @@ def geneNetworkEventHandler(event, geneNetwork):
                 case GNIstate.MOUSEDOWNNOCOLLISION:
                     GNIstate.state = GNIstate.NONE
                     # create a node
-                    geneNetwork.addGene(geneNetwork.screenToCords(event.pos))
+                    newNode = geneNetwork.addGene(
+                        geneNetwork.screenToCords(event.pos))
+                    # set hovering node
+                    GNIstate.hoveringNode = newNode
 
                 case GNIstate.MOUSEDOWNMOVED:
                     # do nothing
@@ -1351,12 +1418,19 @@ def geneNetworkEventHandler(event, geneNetwork):
                 case GNIstate.NEWEDGE:
                     if GNIstate.newEdgeEnd is not None:
                         # set weight for new edge
-                        geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] = GNIstate.newEdgeWeight
-                        # reset new edge weight var
-                        GNIstate.newEdgeWeight = 1
+                        # geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] = GNIstate.newEdgeWeight
+                        geneNetwork.net.setWeight(
+                            GNIstate.newEdgeEnd,
+                            GNIstate.newEdgeStart,
+                            GNIstate.newEdgeWeight)
                         # GNIstate.newEdgeEnd = None
                         # GNIstate.newEdgeStart = None
-                        GNIstate.state = GNIstate.NEWEDGEFINISHED
+                        if GNIstate.newEdgeWeight == 0:
+                            GNIstate.state = GNIstate.NONE
+                        else:
+                            GNIstate.state = GNIstate.NEWEDGEFINISHED
+                        # reset new edge weight var
+                        GNIstate.newEdgeWeight = 1
 
                     else:
                         # Never intersected finish node, clear the edge
@@ -1424,17 +1498,18 @@ class GeneNetwork:
     indicators_z_scale = node_r * 0.1
     indicatorColor_b = (0, 0, 0)
     indicatorColor_k2 = (255, 0, 0)
+    f = None
 
     def __init__(self):
         self.n = 0
         self.z = []
         self.locs = []
         self.colors = []
+        self.displayIndicators = []
         self.net = network.RegulatoryNetwork(0)
 
         self.pan = [0, 0]
         self.zoom = 1
-        pass
 
     def addGene(self, loc):
         self.n += 1
@@ -1445,13 +1520,18 @@ class GeneNetwork:
         newColor = pygame.Color((0, 0, 0))
         newColor.hsva = (random.uniform(0, 360), 80, 50)
         self.colors.append(newColor)
+        self.displayIndicators.append(False)
         self.net.addGene()
+
+        # return the index of new node
+        return self.n - 1
 
     def removeGene(self, i):
         self.n -= 1
         self.z.pop(i)
         self.locs.pop(i)
         self.colors.pop(i)
+        self.displayIndicators.pop(i)
         self.net.removeGene(i)
 
     def cordsToScreen(self, loc):
@@ -1479,6 +1559,25 @@ class GeneNetwork:
     def checkEdgeCollision(self, testPoint):
         pass
 
+    # now, some more organic network modification functions
+    # split edge    create new node in place of an edge
+    # flip edge
+    # duplicate node
+    # duplicated group of nodes (range of indexes)
+    # change node index (regrouping/separating functional groups)
+    # change group of nodes index (transposable elements)
+    # move node along a connected edge ???
+    # move group of nodes along a connected edge ???
+    # delete node
+    # delete group of nodes (range of indexes)
+    # create random edge
+    # delete random existing edge
+    # redirect existing edge to random node
+    # scale edge weight
+    # negate weight
+    # scale parameter (k1, b, k2)
+    # negate bias
+
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
                   weight=None,
@@ -1500,11 +1599,11 @@ class GeneNetwork:
 
             # calculate width from weight
             # if weight is negative, draw flat arrowhead
-            if self.net.w[endNode][startNode] < 0:
+            if self.net.getWeight(endNode, startNode) < 0:
                 angle = math.pi / 2
             # calculate arrow thickness from weight
             radius = abs((self.net.f(
-                self.net.w[endNode][startNode] / 10) * 2 - 1) * 5)
+                self.net.getWeight(endNode, startNode) / 10) * 2 - 1) * 5)
         else:
             # draw to the given corrdinate from the given node
             unit = vunit(vsub(endPos, self.locs[startNode]))
@@ -1608,13 +1707,130 @@ class GeneNetwork:
                  vsum(end, vsum(vmul(perpUnit, -radius),
                                 vmul(perpaunit, -radius * 2)))))])
 
-    def update(self):
-        self.net.step(self.z, 0.01)
+    def drawIndicators(self, surface, i, indicators):
+        # draw bars to indicate input contributions, constituative
+        # expression rate, degredation rate, and total dz/dt
+        # draw b bar
+        origin = vsum(self.cordsToScreen(self.locs[i]),
+                      (-self.indicatorSigmoid_w / 2 * self.zoom,
+                       self.indicators_w * 2 * self.zoom))
+        sum = self.net.b[i]
+        length = self.net.b[i] * self.indicators_z_scale * self.zoom
+        width = self.indicators_w * self.zoom
+        if length < 0:
+            # if negative, offset b bar down
+            origin = vsum(origin, (0, width))
+        # end = vsum(origin, (0, -length))
+        end = vsum(origin, (length, 0))
+        pygame.draw.polygon(surface,
+                            self.indicatorColor_b,
+                            [vint(origin),
+                             vint(vsum(origin, (0, -width))),
+                             vint(vsum(end, (0, -width))),
+                             vint(end)])
+        if length < 0:
+            # re-offset up
+            end = vsum(end, (0, -width))
+
+        for (color, length) in indicators:
+            # tally up a sum of all the input lengths plus bias
+            sum += length
+            # draw all the positive lengths first
+            if length > 0:
+                # draw an indicator bar
+                origin = end
+                length = length * self.indicators_z_scale * self.zoom
+                end = vsum(origin, (length, 0))
+                pygame.draw.polygon(surface,
+                                    color,
+                                    [vint(origin),
+                                     vint(vsum(origin, (0, -width))),
+                                     vint(vsum(end, (0, -width))),
+                                     vint(end)])
+        # offset the next bank on indicators
+        end = vsum(end, (0, -width))
+        for (color, length) in indicators:
+            # draw all the negative lengths now
+            if length < 0:
+                # draw an indicator bar
+                origin = end
+                length = length * self.indicators_z_scale * self.zoom
+                end = vsum(origin, (length, 0))
+                pygame.draw.polygon(surface,
+                                    color,
+                                    [vint(origin),
+                                     vint(vsum(origin, (0, -width))),
+                                     vint(vsum(end, (0, -width))),
+                                     vint(end)])
+        sigx = end
+
+        # draw post-sigmoid expression rate
+        origin = vsum(self.cordsToScreen(self.locs[i]),
+                      (-self.indicators_w * 0 * self.zoom, 0))
+        length = self.net.f(sum) * self.net.k1[i] * self.indicators_dzdt_scale * self.zoom
+        end = vsum(origin, (0, -length))
+        sigy = vsum(end, (width, 0))
+        pygame.draw.polygon(surface,
+                            pygame.Color("Green"),
+                            [vint(origin),
+                             vint(vsum(origin, (width, 0))),
+                             vint(vsum(end, (width, 0))),
+                             vint(end)])
+
+        # draw degredation rate
+        origin = vsum(end, (width, 0))
+        length = -self.net.k2[i] * self.z[i] * self.indicators_dzdt_scale * self.zoom
+        end = vsum(origin, (0, -length))
+        pygame.draw.polygon(surface,
+                            pygame.Color("Red"),
+                            [vint(origin),
+                             vint(vsum(origin, (width, 0))),
+                             vint(vsum(end, (width, 0))),
+                             vint(end)])
+
+        # draw sigmoidal function lines
+        pygame.draw.line(surface,
+                         pygame.Color("Black"),
+                         sigx,
+                         (sigx[0], sigy[1]))
+        pygame.draw.line(surface,
+                         pygame.Color("Black"),
+                         sigy,
+                         (sigx[0], sigy[1]))
+        # draw sigmoid function
+        fi = []
+        origin = vsum(self.cordsToScreen(
+                         self.locs[i]),
+                      (-self.indicatorSigmoid_w / 2 * self.zoom, 0))
+        for p in self.f:
+            fi.append(vsum(self.cordsToScreen(
+                vsum(
+                    self.locs[i],
+                    (p[0], -p[1] * self.net.k1[i]))),
+                           (-self.indicatorSigmoid_w / 2 * self.zoom, 0)))
+        pygame.draw.lines(surface,
+                          pygame.Color("Black"),
+                          False,
+                          fi,
+                          2)
+        # draw axis
+        pygame.draw.line(surface,
+                         pygame.Color("Black"),
+                         vsum(origin,
+                              (-self.indicatorSigmoid_w / 2 * self.zoom,
+                               0)),
+                         vsum(origin,
+                              (self.indicatorSigmoid_w * self.zoom,
+                               0)))
+
+    def update(self, dt):
+        # simulate the network
+        self.net.step(self.z, dt)
 
     def render(self, surface):
 
         # defin sigmoid function samples at this scale
-        f = []
+        self.f = []
         fmin = -self.indicatorSigmoid_w / 2 / self.indicators_z_scale
         fmax = self.indicatorSigmoid_w / 2 / self.indicators_z_scale
         fstep = 1 / self.indicators_z_scale / self.zoom
@@ -1622,9 +1838,12 @@ class GeneNetwork:
         fstep = (fmax - fmin) / fsteps
         for i in range(fsteps):
             x = fmin + fstep * i
-            f.append((x * self.indicators_z_scale,
-                      self.net.f(x) * self.indicators_dzdt_scale))
+            self.f.append((x * self.indicators_z_scale,
+                           self.net.f(x) * self.indicators_dzdt_scale))
+
         # draw nodes
+        # TODO: don't call pygame.draw if the shape is far off surface, it 
+        # causes it to draw VERY slowely as it creates a HUGE area to pixelfill
         for i in range(self.n):
             pygame.draw.circle(surface,
                                self.colors[i],
@@ -1638,137 +1857,35 @@ class GeneNetwork:
                                int(
                                 self.z[i] * self.node_r * 0.9 * self.zoom))
 
-            # draw bars to indicate input contributions, constituative
-            # expression rate, degredation rate, and total dz/dt
-            # draw b bar
-            origin = vsum(self.cordsToScreen(self.locs[i]),
-                          (-self.indicatorSigmoid_w / 2 * self.zoom,
-                           self.indicators_w * 2 * self.zoom))
-            sum = self.net.b[i]
-            length = self.net.b[i] * self.indicators_z_scale * self.zoom
-            width = self.indicators_w * self.zoom
-            if length < 0:
-                # if negative, offset b bar down
-                origin = vsum(origin, (0, width))
-            # end = vsum(origin, (0, -length))
-            end = vsum(origin, (length, 0))
-            pygame.draw.polygon(surface,
-                                self.indicatorColor_b,
-                                [vint(origin),
-                                 vint(vsum(origin, (0, -width))),
-                                 vint(vsum(end, (0, -width))),
-                                 vint(end)])
-            if length < 0:
-                # re-offset up
-                end = vsum(end, (0, -width))
             indicators = []
             # also draw edges
+            # TODO: don't call pygame.draw if the shape is far off surface, it 
+            # causes it to draw VERY slowely as it creates a HUGE area to pixelfill
             for j in range(self.n):
                 # for each edge into node i, draw if weight is not 0
-                if self.net.w[i][j] != 0:
+                if self.net.getWeight(i, j) != 0:
                     # draw an arrow
                     self.drawArrow(surface, j, i)
 
                     color = pygame.Color(self.colors[j])
                     if j == i:
-                        # adjust the color so it's visible
+                        # if it's self, adjust the color so it's visible
                         color.hsva = (color.hsva[0],
                                       color.hsva[1],
                                       color.hsva[2] * 0.8)
-                    value = self.net.w[i][j] * self.z[j]
-                    sum += value
                     # add length for indicator to draw
                     indicators.append((color,
-                                       value))
+                                       self.net.getWeight(i, j) * self.z[j]))
 
-            for (color, length) in indicators:
-                # draw all the positive lengths first
-                if length > 0:
-                    # draw an indicator bar
-                    origin = end
-                    length = length * self.indicators_z_scale * self.zoom
-                    end = vsum(origin, (length, 0))
-                    pygame.draw.polygon(surface,
-                                        color,
-                                        [vint(origin),
-                                         vint(vsum(origin, (0, -width))),
-                                         vint(vsum(end, (0, -width))),
-                                         vint(end)])
-            # offset the next bank on indicators
-            end = vsum(end, (0, -width))
-            for (color, length) in indicators:
-                # draw all the negative lengths now
-                if length < 0:
-                    # draw an indicator bar
-                    origin = end
-                    length = length * self.indicators_z_scale * self.zoom
-                    end = vsum(origin, (length, 0))
-                    pygame.draw.polygon(surface,
-                                        color,
-                                        [vint(origin),
-                                         vint(vsum(origin, (0, -width))),
-                                         vint(vsum(end, (0, -width))),
-                                         vint(end)])
-            sigx = end
-
-            # draw post-sigmoid expression rate
-            origin = vsum(self.cordsToScreen(self.locs[i]),
-                          (-self.indicators_w * 0 * self.zoom, 0))
-            length = self.net.f(sum) * self.net.k1[i] * self.indicators_dzdt_scale * self.zoom
-            end = vsum(origin, (0, -length))
-            sigy = vsum(end, (width, 0))
-            pygame.draw.polygon(surface,
-                                pygame.Color("Green"),
-                                [vint(origin),
-                                 vint(vsum(origin, (width, 0))),
-                                 vint(vsum(end, (width, 0))),
-                                 vint(end)])
-
-            # draw degredation rate
-            origin = vsum(end, (width, 0))
-            length = -self.net.k2[i] * self.z[i] * self.indicators_dzdt_scale * self.zoom
-            end = vsum(origin, (0, -length))
-            pygame.draw.polygon(surface,
-                                pygame.Color("Red"),
-                                [vint(origin),
-                                 vint(vsum(origin, (width, 0))),
-                                 vint(vsum(end, (width, 0))),
-                                 vint(end)])
-
-            # draw sigmoidal function lines
-            pygame.draw.line(surface,
-                             pygame.Color("Black"),
-                             sigx,
-                             (sigx[0], sigy[1]))
-            pygame.draw.line(surface,
-                             pygame.Color("Black"),
-                             sigy,
-                             (sigx[0], sigy[1]))
-            # draw sigmoid function
-            fi = []
-            origin = vsum(self.cordsToScreen(
-                             self.locs[i]),
-                          (-self.indicatorSigmoid_w / 2 * self.zoom, 0))
-            for p in f:
-                fi.append(vsum(self.cordsToScreen(
-                    vsum(
-                        self.locs[i],
-                        (p[0], -p[1] * self.net.k1[i]))),
-                               (-self.indicatorSigmoid_w / 2 * self.zoom, 0)))
-            pygame.draw.lines(surface,
-                              pygame.Color("Black"),
-                              False,
-                              fi,
-                              2)
-            # draw axis
-            pygame.draw.line(surface,
-                             pygame.Color("Black"),
-                             vsum(origin,
-                                  (-self.indicatorSigmoid_w / 2 * self.zoom,
-                                   0)),
-                             vsum(origin,
-                                  (self.indicatorSigmoid_w * self.zoom,
-                                   0)))
+            # draw indicators for node if enabled or hovered
+            if GNIstate.hoveringNode is not None:
+                if GNIstate.hoveringNode == i:
+                    self.drawIndicators(surface, i, indicators)
+                else:
+                    if self.displayIndicators[i]:
+                        self.drawIndicators(surface, i, indicators)
+            elif self.displayIndicators[i]:
+                self.drawIndicators(surface, i, indicators)
 
         # draw new edge
         if GNIstate.state == GNIstate.NEWEDGE:
@@ -2198,8 +2315,6 @@ screen = pygame.display.set_mode((1280, 720))
 pygame.display.set_caption("PolyBridge")
 clock = pygame.time.Clock()
 running = True
-# time step in milliseconds
-dt = 0
 
 debugs = []
 debugCriticalPoints = []
@@ -2225,6 +2340,8 @@ TIME_STEP = 1.0 / TARGET_FPS
 SCREEN_WIDTH, SCREEN_HEIGHT = screen.get_width(), screen.get_height()
 # inverse timestep in inverse seconds
 invdt = TARGET_FPS
+# time step in seconds
+dt = 1 / TARGET_FPS
 
 colors = {
     Box2D.b2_staticBody: (255, 255, 255, 100),
@@ -2265,6 +2382,12 @@ loadLevel(levelNames[0], bridgeObj, levelBackground, screen)
 geneNetworkBackground.fill((255, 255, 255))
 
 geneNetwork = GeneNetwork()
+for i in range(10):
+    geneNetwork.addGene(vmul(u(i / 10 * math.pi * 2), 100))
+for i in range(geneNetwork.n):
+    for j in range(geneNetwork.n):
+        # geneNetwork.net.w[j][i] = random.uniform(-3, 3)
+        geneNetwork.net.setWeight(i, j, random.uniform(-3, 3))
 
 
 # --- pybox2d world setup ---
@@ -2337,7 +2460,7 @@ while running:
         world.Step(TIME_STEP, 30, 30)
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
-        geneNetwork.update()
+        geneNetwork.update(dt)
 
     # Render to the screen
 
@@ -2373,7 +2496,7 @@ while running:
 
     # Flip buffers
     pygame.display.flip()
-    # clock.tick() returns seconds last call.
+    # clock.tick() returns milliseconds last call.
     dt = clock.tick(TARGET_FPS) / 1000
 
 pr.disable()
