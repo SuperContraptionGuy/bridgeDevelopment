@@ -22,6 +22,7 @@ import Box2D
 
 import cProfile
 import pstats
+import timeit
 
 
 def load_png(name):
@@ -1122,6 +1123,41 @@ class GNIstate:
     movingNodeOffset = (0, 0)
     hoveringNode = None
 
+    showHelp = True
+
+    helpString = [
+     "Controls:",
+     "h  - press to show/hide this help message",
+     "leftclick  - add a gene",
+     "The little circle that's changing size inside each gene is the",
+     "   concentration of that gene's protein product, a morphogen, that",
+     "   can interact with other genes to regulate their expression.",
+     "leftclick and drag - create an interaction between two genes",
+     "   Use the scrollwheel during and after dragging to adjust weight.",
+     "   x  - during drag to cancel",
+     "rightclick and drag    - move genes around",
+     "middle click and drag  - pan the view",
+     "scrollwheel   - zoom in and out",
+     "while hovering over a gene, use the scrollwheel while holding down",
+     "one of the following buttons to adjust the gene's parameters:",
+     "   b   - bias, the basal/constituative expression input",
+     "   m   - max, the maximum expression rate",
+     "   d   - destroy, the kinetic degredation rate of the gene product",
+     "i     - while hovering over a gene to toggle the persistent indicator",
+     "display",
+     "   Black horizontal bar is the basal expression input",
+     "   Colored horizontal bars are the interaction inputs",
+     "       which are proportional to the concentration of the connected",
+     "       genes' products(morphogens)",
+     "   The black curve illustrates the transfer function, which relates",
+     "       the sum of a gene's regulator inputs to it's expression rate",
+     "   Green vertical bar is the expression rate, how quickly the",
+     "       concentration of the gene's product is increasing",
+     "   Red vertical bar is the rate of degredation, which is",
+     "       proportional to the current concentration.",
+     "   The final rate of change of concentration is the sum of the red",
+     "       and green bars."]
+
 
 def geneNetworkEventHandler(event, geneNetwork):
     # basically a node editor for recurrent neural networks to model and
@@ -1167,6 +1203,10 @@ def geneNetworkEventHandler(event, geneNetwork):
             geneNetwork.screenToCords(GNIstate.mousePos))
         GNIstate.hoveringNode = collision
 
+        match event.key:
+            case pygame.K_h:
+                GNIstate.showHelp = not GNIstate.showHelp
+
         match GNIstate.state:
             case GNIstate.NONE:
                 match event.key:
@@ -1198,6 +1238,15 @@ def geneNetworkEventHandler(event, geneNetwork):
                             GNIstate.newEdgeWeight = 1
                             GNIstate.newEdge = None
                             GNIstate.state = GNIstate.NONE
+
+            case GNIstate.NEWEDGE:
+                match event.key:
+
+                    case pygame.K_x:
+                        # cancel the edge creation
+                        GNIstate.state = GNIstate.NONE
+                        GNIstate.newEdgeEnd = None
+                        GNIstate.newEdgeStart = None
 
     elif event.type == pygame.MOUSEBUTTONDOWN:
         GNIstate.mousePos = event.pos
@@ -1435,6 +1484,9 @@ def geneNetworkEventHandler(event, geneNetwork):
                     else:
                         # Never intersected finish node, clear the edge
                         GNIstate.state = GNIstate.NONE
+                        GNIstate.newEdgeEnd = None
+                        GNIstate.newEdgeStart = None
+
                 case GNIstate.MOUSEDOWNMOVENODE:
                     GNIstate.state = GNIstate.NONE
 
@@ -1511,20 +1563,39 @@ class GeneNetwork:
         self.pan = [0, 0]
         self.zoom = 1
 
-    def addGene(self, loc):
+    def addGene(self, loc=(0, 0), color=None, nodeExists=False, copy=None,
+                newIndex=None):
+        '''
+        add a new gene and associated interface properties.
+        loc is the coordinate position of the node in the editor
+        nodeExists set it to true if the node already exists in self.net,
+            assuming that self.n is the correct index in self.net lists
+        '''
+        if newIndex is None:
+            newIndex = self.n
         self.n += 1
         # initialize concentration to noisy zero
-        self.z.append(random.random() / 1000000)
-        self.locs.append(loc)
-        # choose random color for the new gene
-        newColor = pygame.Color((0, 0, 0))
-        newColor.hsva = (random.uniform(0, 360), 80, 50)
-        self.colors.append(newColor)
-        self.displayIndicators.append(False)
-        self.net.addGene()
+        self.z.insert(newIndex, random.expovariate(1))
+        self.locs.insert(newIndex, loc)
+        if color is None:
+            # choose random color for the new gene
+            newColor = pygame.Color((0, 0, 0))
+            newColor.hsva = (random.uniform(0, 360), 80, 50)
+            self.colors.insert(newIndex, newColor)
+        else:
+            self.colors.insert(newIndex, color)
+        self.displayIndicators.insert(newIndex, False)
+
+        if not nodeExists:
+            # create a new node, copied if copy is not None
+            self.net.addGene(copy=copy, newIndex=newIndex)
+        else:
+            # don't add a new gene to net, it already exists. append properties
+            # assuming the data is at index newIndex
+            pass
 
         # return the index of new node
-        return self.n - 1
+        return newIndex
 
     def removeGene(self, i):
         self.n -= 1
@@ -1577,6 +1648,109 @@ class GeneNetwork:
     # negate weight
     # scale parameter (k1, b, k2)
     # negate bias
+
+    def splitEdge(self, edge=None):
+        # edge is a tuple (i, j) of parent indexes
+        # edge is [(targetNode, sourceNode), weight]
+        if edge is None:
+            # choose random edge
+            edge = self.net.randomEdge()
+            if edge is None:
+                # if there are no edges, stop
+                return
+
+        newNodePos = vdiv(vsum(self.locs[edge[0][0]],
+                               self.locs[edge[0][1]]), 2)
+        # mix the colors of the two parent nodes
+        hue1 = self.colors[edge[0][0]].hsva[0]
+        hue2 = self.colors[edge[0][1]].hsva[0]
+        newColor = pygame.Color(self.colors[edge[0][0]])
+        # take the average hue, making sure to use the shortest circular
+        # distance between the two hues
+        if hue2 - hue1 <= 180:
+            newHue = (hue1 + hue2) / 2
+        else:
+            newHue = ((hue1 + hue2) / 2 + 180) % 360
+        newColor.hsva = (newHue,
+                         newColor.hsva[1],
+                         newColor.hsva[2],
+                         newColor.hsva[3])
+
+        newNode = self.addGene(newNodePos, color=newColor)
+        self.net.insertNode(edge, newNode)
+
+    def duplicateNode(self, node=None):
+        if node is None:
+            node = self.net.randomNode()
+            if node is None:
+                return
+
+        # position the new node randomly offset from old one
+        newNodePos = vsum(self.locs[node],
+                          vmul(u(random.uniform(0, math.pi * 2)),
+                          self.node_r * 3))
+        # generate a color offset from old node
+        newColor = pygame.Color(self.colors[node])
+        newHue = (newColor.hsva[0] +
+                  random.vonmisesvariate(0, 8) * 360 / 2 / math.pi) % 360
+        newColor.hsva = (newHue,
+                         newColor.hsva[1],
+                         newColor.hsva[2],
+                         newColor.hsva[3])
+        newNode = self.addGene(newNodePos, color=newColor, copy=node)
+        self.net.duplicateNode(node, newNode)
+
+    def duplicateNodeGroup(self, nodeRange=None):
+        # duplicate nodeRange, or a random range if nodeRange is None
+        oldNodesRange = self.net.duplicateNodeGroup(nodeRange)
+
+        oldNodes = list(range(oldNodesRange[0], oldNodesRange[1] + 1))
+        newNodesRange = (self.n, self.n + oldNodesRange[1] - oldNodesRange[0])
+        newNodes = list(range(newNodesRange[0], newNodesRange[1] + 1))
+
+        # calculate extent of node group to allow offset
+        # measure distance between all nodes in group
+        # store largest distance, as a vector
+        maxDist = self.node_r * 2
+        maxDistVec = vmul(u(random.vonmisesvariate(0, 0)), maxDist)
+        for node1 in oldNodes:
+            for node2 in oldNodes:
+                vec = vsub(self.locs[node1], self.locs[node2])
+                dist = vmag(vec)
+                if dist > maxDist:
+                    maxDist = dist
+                    maxDistVec = vec
+        # offset all the nodes in the new group by an amount perpendicular to
+        # distvec
+        offset = vperp(vmul(maxDistVec, 0.5))
+        hueOffset = random.vonmisesvariate(0, 8) * 360 / 2 / math.pi
+        # generate properties of new nodes
+        for (i, node) in enumerate(newNodes):
+            # generate a color offset from the corrisponding old node
+            newColor = pygame.Color(self.colors[oldNodes[i]])
+            newHue = (newColor.hsva[0] + hueOffset) % 360
+            newColor.hsva = (newHue,
+                             newColor.hsva[1],
+                             newColor.hsva[2],
+                             newColor.hsva[3])
+
+            self.addGene(vsum(self.locs[oldNodes[i]], offset),
+                         nodeExists=True,
+                         color=newColor)
+
+    def changeNodeIndex(self, oldIndex=None, newIndex=None):
+        if oldIndex is None:
+            oldIndex = random.randrange(self.n)
+        if newIndex is None:
+            newIndex = random.randrange(self.n)
+
+        # make copy of params
+        self.addGene(nodeExists=True, copy=oldIndex, newIndex=newIndex)
+        # modify network
+        self.net.changeNodeIndex(oldIndex, newIndex)
+
+        # remove old gene
+        self.removeGene(oldIndex)
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
@@ -1842,7 +2016,7 @@ class GeneNetwork:
                            self.net.f(x) * self.indicators_dzdt_scale))
 
         # draw nodes
-        # TODO: don't call pygame.draw if the shape is far off surface, it 
+        # TODO: don't call pygame.draw if the shape is far off surface, it
         # causes it to draw VERY slowely as it creates a HUGE area to pixelfill
         for i in range(self.n):
             pygame.draw.circle(surface,
@@ -1855,12 +2029,14 @@ class GeneNetwork:
                                self.colors[i],
                                vint(self.cordsToScreen(self.locs[i])),
                                int(
-                                self.z[i] * self.node_r * 0.9 * self.zoom))
+                                1 / (1 + 1 / self.z[i]) *
+                                self.node_r * 0.9 * self.zoom))
 
             indicators = []
             # also draw edges
-            # TODO: don't call pygame.draw if the shape is far off surface, it 
-            # causes it to draw VERY slowely as it creates a HUGE area to pixelfill
+            # TODO: don't call pygame.draw if the shape is far off surface, it
+            # causes it to draw VERY slowely as it creates a HUGE area to
+            # pixelfill
             for j in range(self.n):
                 # for each edge into node i, draw if weight is not 0
                 if self.net.getWeight(i, j) != 0:
@@ -1911,6 +2087,18 @@ class GeneNetwork:
                                endPos=self.screenToCords(GNIstate.mousePos),
                                weight=weight,
                                color=color)
+
+        if GNIstate.showHelp:
+            font = pygame.font.Font(None, 24)
+            nextPos = levelBackground.get_rect()
+            for helpLine in GNIstate.helpString:
+                text = font.render(helpLine,
+                                   True,
+                                   (0, 0, 0))
+                textpos = text.get_rect()
+                textpos.topleft = nextPos.topleft
+                nextPos.topleft = textpos.bottomleft
+                surface.blit(text, textpos)
 
 
 def stopBridgeSimulation(world, bridgeObj, SimulatorVars):
@@ -2381,13 +2569,28 @@ loadLevel(levelNames[0], bridgeObj, levelBackground, screen)
 # geneNetworkBackground.fill((161, 197, 224))
 geneNetworkBackground.fill((255, 255, 255))
 
+
 geneNetwork = GeneNetwork()
 for i in range(10):
     geneNetwork.addGene(vmul(u(i / 10 * math.pi * 2), 100))
 for i in range(geneNetwork.n):
     for j in range(geneNetwork.n):
         # geneNetwork.net.w[j][i] = random.uniform(-3, 3)
+        # if random.choice([True, False]):
         geneNetwork.net.setWeight(i, j, random.uniform(-3, 3))
+# geneNetwork.duplicateNodeGroup()
+# geneNetwork.duplicateNode()
+# geneNetwork.splitEdge()
+
+n = 100000
+times = timeit.repeat('geneNetwork.update(0.01)', globals=globals(), repeat=10, number=n)
+print(times)
+average = 0
+for time in times:
+    average += time
+average /= len(times)
+print(average)
+print(average / n)
 
 
 # --- pybox2d world setup ---

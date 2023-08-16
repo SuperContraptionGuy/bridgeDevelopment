@@ -102,7 +102,9 @@ class RegulatoryNetwork:
                 w=None,
                 w2=None,
                 b=None,
-                k2=None):
+                k2=None,
+                copy=None,
+                newIndex=None):
         '''
         adds a node to the neural network (a gene/morphogen)
         all parameters are numbers, except w, which is a vector of length n
@@ -112,25 +114,36 @@ class RegulatoryNetwork:
         other node is affected by the new one. The last value in w represents
         the weight the new substance has on itself.
         '''
+
+        if newIndex is None:
+            newIndex = self.n
+
         self.n += 1
-        if k1 is not None:
-            self.k1.append(k1)
+
+        if copy is None:
+            if k1 is not None:
+                self.k1.insert(newIndex, k1)
+            else:
+                self.k1.insert(newIndex, random.expovariate(1))
+            if b is not None:
+                self.b.insert(newIndex, b)
+            else:
+                self.b.insert(newIndex, random.gauss(0, 1))
+            if k2 is not None:
+                self.k2.insert(newIndex, k2)
+            else:
+                self.k2.insert(newIndex, random.expovariate(1))
         else:
-            self.k1.append(1)
-        if b is not None:
-            self.b.append(b)
-        else:
-            self.b.append(0)
-        if k2 is not None:
-            self.k2.append(k2)
-        else:
-            self.k2.append(1)
+            # copy parameters from copy, but not edges
+            self.k1.insert(newIndex, self.k1[copy])
+            self.b.insert(newIndex, self.b[copy])
+            self.k2.insert(newIndex, self.k2[copy])
 
         # fill with zeros, no connections between the old nodes and the
         # new nodes, blank slate
         for i in range(self.n-1):
-            self.w[i].append(0)
-        self.w.append([0 for i in range(self.n)])
+            self.w[i].insert(newIndex, 0)
+        self.w.insert(newIndex, [0 for i in range(self.n)])
 
         # then modify w and weightList using setWeight() and the new data if
         # there is any
@@ -138,11 +151,14 @@ class RegulatoryNetwork:
             # first add an entry on the inputs to every other node
             for (i, w2i) in enumerate(w2):
                 # self.w[i].append(w2i)
-                self.setWeight(i, self.n - 1, w2i)
+                self.setWeight(i, newIndex, w2i)
             # then add an entire row of inputs for the new node
             # self.w.append(w)
             for (j, wi) in enumerate(w):
-                self.setWeight(self.n - 1, j, wi)
+                self.setWeight(newIndex, j, wi)
+
+        # return index of new node
+        return newIndex
 
     def removeGene(self, i):
         '''Remove gene i'''
@@ -175,19 +191,243 @@ class RegulatoryNetwork:
 
                     # only add the edge if it's not deleted
                     newEdges.append(((newParent1, newParent2),
-                                 weight))
+                                     weight))
 
             self.n -= 1
             # Update edgeList to contain the new keys
             self.edgeList = dict(newEdges)
 
+    # now, some more organic network modification functions
+    # split edge    create new node in place of an edge (insertNode)
+    # flip edge
+    # duplicate node
+    # duplicated group of nodes (range of indexes)
+    # change node index (regrouping/separating functional groups)
+    # change group of nodes index (transposable elements)
+    # move node along a connected edge ???
+    # move group of nodes along a connected edge ???
+    # delete node
+    # delete group of nodes (range of indexes)
+    # create random edge
+    # delete random existing edge
+    # redirect existing edge to random node
+    # scale edge weight
+    # negate weight
+    # scale parameter (k1, b, k2)
+    # negate bias
+
+    def insertNode(self, edge=None, node=None):
+        '''
+        edge is a tuple (i, j) of parent indexes
+        node is the index of the node to insert into the edge
+        '''
+        # this fuction might break if edge weight is 0
+
+        if edge is None:
+            edge = self.randomEdge()
+            if edge is None:
+                return
+        if node is None:
+            # create a new random node to insert
+            node = self.addGene()
+
+        # displace current edge with two new edges connected to node
+        self.setWeight(edge[0][0], node, edge[1])
+        self.setWeight(node, edge[0][1], edge[1])
+        self.setWeight(edge[0][0], edge[0][1], 0)
+
+    def flipEdge(self, edge=None):
+        if edge is None:
+            edge = self.randomEdge()
+            if edge is None:
+                return
+
+        # flip the values of the reciprocal edges
+        tmpWeight = self.getWeight(edge[0][1], edge[0][0])
+        self.setWeight(edge[0][1], edge[0][0], edge[1])
+        self.setWeight(edge[0][0], edge[0][1], tmpWeight)
+
+    def duplicateNode(self, node=None, newNode=None):
+        if node is None:
+            node = self.randomNode()
+            if node is None:
+                return
+        if newNode is None:
+            # copy node
+            newNode = self.addGene(copy=node)
+
+        # copy all the incomming edges on node to newNode
+        # except self nodes, convert those so they don't connect the clones
+        # but instead connect the newNode to itself
+        for (j, weight) in enumerate(self.w[node].copy()):
+            if weight == 0:
+                continue
+
+            if j == node:
+                # loopback weight, create a loopback weight on newNode
+                self.setWeight(newNode, newNode, weight)
+            else:
+                # copy the weigts over, pointing to newNode
+                self.setWeight(newNode, j, weight)
+        # then copy the outgoing edges point from newNode
+        # skip self edges
+        for (i, weights) in enumerate(self.w.copy()):
+            if weights[node] == 0:
+                # skip
+                continue
+
+            if i == node:
+                # skip loopback edge
+                continue
+
+            self.setWeight(i, newNode, weights[node])
+
+        # return new node
+        return newNode
+
+    def duplicateNodeGroup(self, nodeRange=None, meanLength=3):
+        '''
+        nodeRange is a tuple with the index of two nodes. Those nodes and
+        all the noded between them will be duplicated
+        '''
+        # choose two random nodes. The set between these nodes will be
+        # duplicated, including them. edges between nodes in the group
+        # will be duplicated onto the new group. edges between nodes
+        # within and nodes without the group will be duplicated to point
+        # to/from the same outside nodes from/to the new node group
+        if nodeRange is None:
+            # choose random range, with a mean length
+            r1 = random.randrange(self.n)
+            length = int(random.gauss(0, meanLength))
+
+            if length >= 0:
+                if r1 + length < self.n:
+                    # within range
+                    nodeRange = (r1, r1 + length)
+                else:
+                    # go all the way to the end
+                    nodeRange = (r1, self.n - 1)
+            else:
+                if r1 + length >= 0:
+                    nodeRange = (r1 + length, r1)
+                else:
+                    # go to the end
+                    nodeRange = (0, r1)
+        else:
+            # make sure the first index is smaller than or equal to the second
+            if nodeRange[0] > nodeRange[1]:
+                nodeRange = (nodeRange[1], nodeRange[0])
+
+        copyRange = (self.n, self.n + nodeRange[1] - nodeRange[0])
+
+        oldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
+        newNodes = list(range(copyRange[0], copyRange[1] + 1))
+
+        # duplicate each node, with properties
+        for node in oldNodes:
+            self.addGene(copy=node)
+
+        # Then duplicate edge structure
+        for (index, oldNode) in enumerate(oldNodes):
+            newNode = newNodes[index]
+
+            # edges pointing to oldNode
+            for (j, weight) in enumerate(self.w[oldNode].copy()):
+                if weight == 0:
+                    # skip
+                    continue
+
+                # check it the edge is coming from oldNode (loopback) inside
+                # the group (nodeRange) or outside.
+                if j == oldNode:
+                    # loopback edge
+                    self.setWeight(newNode, newNode, weight)
+                elif j >= nodeRange[0] and j <= nodeRange[1]:
+                    # edge comes from inside the group, so it should come from
+                    # the corrisponding edge in the new group
+                    newj = j - nodeRange[0] + copyRange[0]
+                    self.setWeight(newNode, newj, weight)
+                else:
+                    # edge comes from outside the duplicated range.
+                    self.setWeight(newNode, j, weight)
+
+            # now duplicate edges pointing away from oldNode
+            for (i, inputs) in enumerate(self.w.copy()):
+                weight = inputs[oldNode]
+                if weight == 0:
+                    # skip
+                    continue
+
+                # check it the edge is going to oldNode (loopback) inside
+                # the group (nodeRange) or outside.
+                if i == oldNode:
+                    # loopback edge, skip
+                    # self.setWeight(newNode, newNode, weight)
+                    continue
+                if i >= nodeRange[0] and i <= nodeRange[1]:
+                    # edge points inside the group, so it should point to
+                    # the corrisponding edge in the new group
+                    newi = i - nodeRange[0] + copyRange[0]
+                    self.setWeight(newi, newNode, weight)
+                else:
+                    # edge points outside the duplicated range.
+                    self.setWeight(i, newNode, weight)
+
+        # returns the range of old nodes
+        # new nodes are appended, same length as old nodes
+        return nodeRange
+
+    def changeNodeIndex(self, oldIndex=None, newIndex=None):
+        ''' Move a node. Returns an updated position of the newIndex'''
+        if oldIndex is None:
+            oldIndex = random.randrange(self.n)
+        if newIndex is None:
+            newIndex = random.randrange(self.n)
+
+        # duplicate parameters into custom index
+        newNode = self.addGene(copy=oldIndex, newIndex=newIndex)
+
+        # old index may be shifted by the new insertion
+        if oldIndex >= newIndex:
+            oldIndex += 1
+
+        # duplicate connections onto copy
+        self.duplicateNode(oldIndex, newNode)
+
+        # remove old node
+        self.removeGene(oldIndex)
+
+        # new index may be shifted
+        if newIndex > oldIndex:
+            newIndex -= 1
+
+        # return the updated index position of the new node
+        return newIndex
+
+    def randomNode(self):
+        if self.n == 0:
+            return None
+            # random.randrange(
+        ret = random.randrange(self.n)
+        return ret
+
+    def randomEdge(self):
+        # choose random edge
+        edges = list(self.edgeList.items())
+        if len(edges) == 0:
+            # if there are no edges, stop
+            return None
+        return edges[random.randrange(len(edges))]
+
     def f(self, x):
         '''Sigmoidal function'''
-        # make sure to avoid Overflow errors
+        # make sure to avoid Overflow errors, clamp to zero
         if -x > self.EXP_MAX:
             return 0
 
         # Transfer function, sigmoidal function
+        # other transfer functions might be more performant, but this seems
+        # decently fast
         return 1 / (1 + math.exp(-x))
 
     def calculate_dz(self, z):
@@ -202,26 +442,17 @@ class RegulatoryNetwork:
 
         # calculate the expression rates based on all concentrations and
         # connection weights
+        # initialize to bias vector
         g = [self.b[x] for x in range(self.n)]
         # for each edge, calculate the sum of effect it has on each output i
         # using the more efficient edgeList dictionary
         for (parents, weight) in self.edgeList.items():
+            # for each input node j, sum the effect it has on output i
             g[parents[0]] += weight * z[parents[1]]
 
         dz = [0 for x in range(self.n)]
         # for each output node i, calculate rate of change of concentration
         for (i, zi) in enumerate(z):
-            # bias vector
-            # gi = self.b[i]
-            # for each input node j, sum the effect it has on output i
-            # for (j, zj) in enumerate(z):
-                # maybe this if will make it a little bit faster
-                # probably would be much faster to store a list of edges
-                # with a reference to their parent's index values and it's
-                # weight
-                # if self.w[i][j] != 0:
-                    # gi += self.w[i][j] * zj
-
             dz[i] = self.k1[i] * self.f(g[i]) - self.k2[i] * zi
 
         return dz
