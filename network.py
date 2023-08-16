@@ -1,4 +1,5 @@
 import math
+import numpy
 import random
 import sys
 
@@ -42,23 +43,26 @@ class RegulatoryNetwork:
         '''
         # initalize internal neural network parameters
         self.n = n
+        self.EXP_MAX_NUMPY = numpy.full(self.n, self.EXP_MAX)
+        self.g = numpy.zeros(self.n, dtype=numpy.float64)
+        self.dz = numpy.zeros(self.n, dtype=numpy.float64)
         self.edgeList = {}
         if k1 is None:
-            self.k1 = [1 for x in range(n)]
+            self.k1 = numpy.array([1 for x in range(n)])
         else:
-            self.k1 = k1
+            self.k1 = numpy.array(k1)
         if w is None:
-            self.w = [[0 for x in range(n)] for y in range(n)]
+            self.w = numpy.array([[0 for x in range(n)] for y in range(n)])
         else:
-            self.w = w
+            self.w = numpy.array(w)
         if b is None:
-            self.b = [1 for x in range(n)]
+            self.b = numpy.array([1 for x in range(n)])
         else:
-            self.b = b
+            self.b = numpy.array(b)
         if k2 is None:
-            self.k2 = [1 for x in range(n)]
+            self.k2 = numpy.array([1 for x in range(n)])
         else:
-            self.k2 = k2
+            self.k2 = numpy.array(k2)
 
     def setWeight(self, i, j, wij):
         # set the weight with parents j, i
@@ -119,31 +123,54 @@ class RegulatoryNetwork:
             newIndex = self.n
 
         self.n += 1
+        self.EXP_MAX_NUMPY = numpy.full(self.n, self.EXP_MAX)
+        self.g = numpy.zeros(self.n, dtype=numpy.float64)
+        self.dz = numpy.zeros(self.n, dtype=numpy.float64)
 
         if copy is None:
             if k1 is not None:
-                self.k1.insert(newIndex, k1)
+                newParam = self.k1.tolist()
+                newParam.insert(newIndex, k1)
+                self.k1 = numpy.array(newParam)
             else:
-                self.k1.insert(newIndex, random.expovariate(1))
+                newk1 = self.k1.tolist()
+                newk1.insert(newIndex, random.expovariate(1))
+                self.k1 = numpy.array(newk1)
             if b is not None:
-                self.b.insert(newIndex, b)
+                newParam = self.b.tolist()
+                newParam.insert(newIndex, b)
+                self.b = numpy.array(newParam)
             else:
-                self.b.insert(newIndex, random.gauss(0, 1))
+                newParam = self.b.tolist()
+                newParam.insert(newIndex, random.gauss(0, 1))
+                self.b = numpy.array(newParam)
             if k2 is not None:
-                self.k2.insert(newIndex, k2)
+                newParam = self.k2.tolist()
+                newParam.insert(newIndex, k2)
+                self.k2 = numpy.array(newParam)
             else:
-                self.k2.insert(newIndex, random.expovariate(1))
+                newParam = self.k2.tolist()
+                newParam.insert(newIndex, random.expovariate(1))
+                self.k2 = numpy.array(newParam)
         else:
             # copy parameters from copy, but not edges
-            self.k1.insert(newIndex, self.k1[copy])
-            self.b.insert(newIndex, self.b[copy])
-            self.k2.insert(newIndex, self.k2[copy])
+            newParam = self.k2.tolist()
+            newParam.insert(newIndex, self.k1[copy])
+            self.k2 = numpy.array(newParam)
+            newParam = self.b.tolist()
+            newParam.insert(newIndex, self.b[copy])
+            self.b = numpy.array(newParam)
+            newParam = self.k2.tolist()
+            newParam.insert(newIndex, self.k2[copy])
+            self.k2 = numpy.array(newParam)
 
         # fill with zeros, no connections between the old nodes and the
         # new nodes, blank slate
+        neww = self.w.tolist()
         for i in range(self.n-1):
-            self.w[i].insert(newIndex, 0)
-        self.w.insert(newIndex, [0 for i in range(self.n)])
+            neww[i].insert(newIndex, 0)
+        neww.insert(newIndex, [0 for i in range(self.n)])
+        self.w = numpy.array(neww)
 
         # then modify w and weightList using setWeight() and the new data if
         # there is any
@@ -164,19 +191,27 @@ class RegulatoryNetwork:
         '''Remove gene i'''
         if self.n > 0:
 
-            self.k1.pop(i)
-            self.b.pop(i)
-            self.k2.pop(i)
+            newParam = self.k1.tolist()
+            newParam.pop(i)
+            self.k1 = numpy.array(newParam)
+            newParam = self.b.tolist()
+            newParam.pop(i)
+            self.b = numpy.array(newParam)
+            newParam = self.k2.tolist()
+            newParam.pop(i)
+            self.k2 = numpy.array(newParam)
 
             # remove the input from gene i from all other nodes
-            for jl in self.w:
+            w = self.w.tolist()
+            for jl in w:
                 # modify the weight list for inputs from i
                 jl.pop(i)
 
             # remove entire row on inputs for i
-            self.w.pop(i)
-            # entire edge list must be re-keyed since all indexes changed.
+            w.pop(i)
+            self.w = numpy.array(w)
 
+            # entire edge list must be re-keyed since all indexes changed.
             newEdges = []
             for (parents, weight) in self.edgeList.items():
                 newParent1 = parents[0]
@@ -194,6 +229,9 @@ class RegulatoryNetwork:
                                      weight))
 
             self.n -= 1
+            self.EXP_MAX_NUMPY = numpy.full(self.n, self.EXP_MAX)
+            self.g = numpy.zeros(self.n, dtype=numpy.float64)
+            self.dz = numpy.zeros(self.n, dtype=numpy.float64)
             # Update edgeList to contain the new keys
             self.edgeList = dict(newEdges)
 
@@ -271,7 +309,7 @@ class RegulatoryNetwork:
                 self.setWeight(newNode, j, weight)
         # then copy the outgoing edges point from newNode
         # skip self edges
-        for (i, weights) in enumerate(self.w.copy()):
+        for (i, weights) in enumerate(self.w.tolist()):
             if weights[node] == 0:
                 # skip
                 continue
@@ -352,7 +390,7 @@ class RegulatoryNetwork:
                     self.setWeight(newNode, j, weight)
 
             # now duplicate edges pointing away from oldNode
-            for (i, inputs) in enumerate(self.w.copy()):
+            for (i, inputs) in enumerate(self.w.tolist()):
                 weight = inputs[oldNode]
                 if weight == 0:
                     # skip
@@ -431,6 +469,9 @@ class RegulatoryNetwork:
         return 1 / (1 + math.exp(-x))
 
     def calculate_dz(self, z):
+        '''returns the change in concentration for each morphogen.
+        z is a numpy.array(self.n, dtype=numpy.float64) object
+        returns the same kind of object'''
         # calculate the rate of change of each morphogen
         # according to the stored weights, bias, rate constants.
         # useful when there is an underlying concentration map that should
@@ -443,21 +484,27 @@ class RegulatoryNetwork:
         # calculate the expression rates based on all concentrations and
         # connection weights
         # initialize to bias vector
-        g = [self.b[x] for x in range(self.n)]
+        numpy.copyto(self.g, self.b)
         # for each edge, calculate the sum of effect it has on each output i
         # using the more efficient edgeList dictionary
         for (parents, weight) in self.edgeList.items():
             # for each input node j, sum the effect it has on output i
-            g[parents[0]] += weight * z[parents[1]]
+            self.g[parents[0]] += weight * z[parents[1]]
 
-        dz = [0 for x in range(self.n)]
-        # for each output node i, calculate rate of change of concentration
-        for (i, zi) in enumerate(z):
-            dz[i] = self.k1[i] * self.f(g[i]) - self.k2[i] * zi
+        # make sure to avoid Overflow errors, clamp to zero
+        self.g *= -1
+        # avoid allocating new memory by using in place operations
+        numpy.exp(numpy.minimum(self.g, self.EXP_MAX_NUMPY), out=self.dz)
+        self.dz += 1
+        self.dz **= -1
+        # numpy.reciprocal(out, out=out)
+        self.dz *= self.k1
+        self.dz -= self.k2 * z
 
-        return dz
+        return self.dz
 
     def step(self, z, dt):
+        '''z is a numpy.array(self.n, dtype=numpy.float64)'''
         # do the integration on the self stored concentration matrix.
         # only useful if the Network object isn't interacting with other
         # Network objects.
@@ -469,8 +516,8 @@ class RegulatoryNetwork:
         # complex relationship between the mophogen concentrations in different
         # matrixes, not just updating the concentrations of a single matrix
         # 1-to-1
-        for (i, dzi) in enumerate(dz):
-            z[i] += dzi * dt
+        dz *= dt
+        z += dz
 
 
 def osscilatingCircuit():

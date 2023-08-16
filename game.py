@@ -11,6 +11,7 @@
 import os
 import json
 import math
+import numpy
 import random
 import pygame
 import pygame.gfxdraw
@@ -1554,7 +1555,8 @@ class GeneNetwork:
 
     def __init__(self):
         self.n = 0
-        self.z = []
+        # self.z = []
+        self.z = numpy.zeros(self.n, dtype=numpy.float64)
         self.locs = []
         self.colors = []
         self.displayIndicators = []
@@ -1575,7 +1577,9 @@ class GeneNetwork:
             newIndex = self.n
         self.n += 1
         # initialize concentration to noisy zero
-        self.z.insert(newIndex, random.expovariate(1))
+        newz = self.z.tolist()
+        newz.insert(newIndex, random.expovariate(1))
+        self.z = numpy.array(newz)
         self.locs.insert(newIndex, loc)
         if color is None:
             # choose random color for the new gene
@@ -1599,7 +1603,8 @@ class GeneNetwork:
 
     def removeGene(self, i):
         self.n -= 1
-        self.z.pop(i)
+        self.z = numpy.array(
+            self.z.tolist().pop(i))
         self.locs.pop(i)
         self.colors.pop(i)
         self.displayIndicators.pop(i)
@@ -2582,15 +2587,15 @@ for i in range(geneNetwork.n):
 # geneNetwork.duplicateNode()
 # geneNetwork.splitEdge()
 
-n = 100000
-times = timeit.repeat('geneNetwork.update(0.01)', globals=globals(), repeat=10, number=n)
-print(times)
-average = 0
-for time in times:
-    average += time
-average /= len(times)
-print(average)
-print(average / n)
+# n = 100000
+# times = timeit.repeat('geneNetwork.update(0.01)', globals=globals(), repeat=10, number=n)
+# print(times)
+# average = 0
+# for time in times:
+#     average += time
+# average /= len(times)
+# print(average)
+# print(average / n)
 
 
 # --- pybox2d world setup ---
