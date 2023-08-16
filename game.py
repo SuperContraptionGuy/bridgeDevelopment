@@ -2571,27 +2571,6 @@ geneNetworkBackground.fill((255, 255, 255))
 
 
 geneNetwork = GeneNetwork()
-for i in range(10):
-    geneNetwork.addGene(vmul(u(i / 10 * math.pi * 2), 100))
-for i in range(geneNetwork.n):
-    for j in range(geneNetwork.n):
-        # geneNetwork.net.w[j][i] = random.uniform(-3, 3)
-        # if random.choice([True, False]):
-        geneNetwork.net.setWeight(i, j, random.uniform(-3, 3))
-# geneNetwork.duplicateNodeGroup()
-# geneNetwork.duplicateNode()
-# geneNetwork.splitEdge()
-
-n = 100000
-times = timeit.repeat('geneNetwork.update(0.01)', globals=globals(), repeat=10, number=n)
-print(times)
-average = 0
-for time in times:
-    average += time
-average /= len(times)
-print(average)
-print(average / n)
-
 
 # --- pybox2d world setup ---
 # Create the world
