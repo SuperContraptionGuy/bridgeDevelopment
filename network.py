@@ -95,7 +95,11 @@ class RegulatoryNetwork:
         # weight
 
     def getWeight(self, i, j):
-        return self.w[i][j]
+        try:
+            return self.edgeList[(i, j)]
+        except KeyError:
+            return 0
+        # return self.w[i][j]
 
     def addGene(self,
                 k1=None,
@@ -431,6 +435,8 @@ class RegulatoryNetwork:
         return 1 / (1 + math.exp(-x))
 
     def calculate_dz(self, z):
+        if self.n != len(z):
+            print("NOT EQUAL: ", self.n, len(z))
         # calculate the rate of change of each morphogen
         # according to the stored weights, bias, rate constants.
         # useful when there is an underlying concentration map that should
