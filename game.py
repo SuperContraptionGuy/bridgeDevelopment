@@ -458,11 +458,15 @@ def vsub(a, b):
 
 
 def vmag(a):
-    # return math.sqrt(math.pow(a[0], 2) + math.pow(a[1], 2))
     return math.sqrt(a[0] * a[0] + a[1] * a[1])
 
 
 def vunit(a):
+    # return math.sqrt(math.pow(a[0], 2) + math.pow(a[1], 2))
+    if a[0] == 0:
+        if a[1] == 0:
+            # if a is mag 0, return this default vector
+            return (1, 0)
     return vdiv(a, vmag(a))
 
 
@@ -1205,6 +1209,7 @@ def geneNetworkEventHandler(event, geneNetwork):
 
         match event.key:
             case pygame.K_h:
+                # help
                 GNIstate.showHelp = not GNIstate.showHelp
 
         match GNIstate.state:
@@ -1212,17 +1217,44 @@ def geneNetworkEventHandler(event, geneNetwork):
                 match event.key:
 
                     case pygame.K_x:
+                        # x it out
                         # delete a node if hovering
                         if GNIstate.hoveringNode is not None:
                             geneNetwork.removeGene(GNIstate.hoveringNode)
                             GNIstate.hoveringNode = None
 
                     case pygame.K_i:
+                        # indicator toggle
                         # change state of indicators for node if hovering
                         if GNIstate.hoveringNode is not None:
                             geneNetwork.displayIndicators[
                                 GNIstate.hoveringNode] = not geneNetwork.displayIndicators[
                                 GNIstate.hoveringNode]
+
+                    case pygame.K_z:
+                        # Zap!
+                        # choose a random mutation to apply to the network.
+                        mutationIndex = random.randrange(6)
+                        match mutationIndex:
+                            case 0:
+                                print("splitEdge")
+                                geneNetwork.splitEdge()
+                            case 1:
+                                print("duplicateNode")
+                                geneNetwork.duplicateNode()
+                            case 2:
+                                print("duplicateNodeGroup")
+                                geneNetwork.duplicateNodeGroup()
+                            case 3:
+                                print("changeNodeIndex")
+                                geneNetwork.changeNodeIndex()
+                            case 4:
+                                print("flipEdge")
+                                geneNetwork.net.flipEdge()
+                            case 5:
+                                print("removeGene")
+                                geneNetwork.removeGene(
+                                    geneNetwork.net.randomNode())
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:
@@ -1552,7 +1584,7 @@ class GeneNetwork:
     indicatorColor_k2 = (255, 0, 0)
     f = None
 
-    def __init__(self):
+    def __init__(self, world):
         self.n = 0
         self.z = []
         self.locs = []
@@ -1560,10 +1592,14 @@ class GeneNetwork:
         self.displayIndicators = []
         self.net = network.RegulatoryNetwork(0)
 
+        self.world = world
+        self.box2DBodies = []
+        self.box2DJoints = []
+
         self.pan = [0, 0]
         self.zoom = 1
 
-    def addGene(self, loc=(0, 0), color=None, nodeExists=False, copy=None,
+    def addGene(self, loc=None, color=None, nodeExists=False, copy=None,
                 newIndex=None):
         '''
         add a new gene and associated interface properties.
@@ -1576,14 +1612,35 @@ class GeneNetwork:
         self.n += 1
         # initialize concentration to noisy zero
         self.z.insert(newIndex, random.expovariate(1))
+
+        if loc is None:
+            if copy is not None:
+                loc = self.locs[copy]
+            else:
+                loc = (0, 0)
         self.locs.insert(newIndex, loc)
+
         if color is None:
-            # choose random color for the new gene
-            newColor = pygame.Color((0, 0, 0))
-            newColor.hsva = (random.uniform(0, 360), 80, 50)
-            self.colors.insert(newIndex, newColor)
-        else:
-            self.colors.insert(newIndex, color)
+            if copy is not None:
+                color = pygame.Color(self.colors[copy])
+            else:
+                # choose random color for the new gene
+                color = pygame.Color((0, 0, 0))
+                color.hsva = (random.uniform(0, 360), 80, 50)
+                # self.colors.insert(newIndex, newColor)
+        self.colors.insert(newIndex, color)
+
+        # create physics body and collider shape
+        self.box2DBodies.insert(
+            newIndex,
+            self.world.CreateDynamicBody(
+                position=self.locs[newIndex],
+                shapes=[Box2D.b2CircleShape(
+                    radius=self.node_r)],
+                shapeFixture=Box2D.b2FixtureDef(
+                    density=1,
+                    friction=1)))
+
         self.displayIndicators.insert(newIndex, False)
 
         if not nodeExists:
@@ -1598,12 +1655,13 @@ class GeneNetwork:
         return newIndex
 
     def removeGene(self, i):
-        self.n -= 1
-        self.z.pop(i)
-        self.locs.pop(i)
-        self.colors.pop(i)
-        self.displayIndicators.pop(i)
-        self.net.removeGene(i)
+        if self.n > 0:
+            self.n -= 1
+            self.z.pop(i)
+            self.locs.pop(i)
+            self.colors.pop(i)
+            self.displayIndicators.pop(i)
+            self.net.removeGene(i)
 
     def cordsToScreen(self, loc):
         # return vsub(vmul(loc, self.zoom), self.pan)
@@ -1679,7 +1737,9 @@ class GeneNetwork:
         newNode = self.addGene(newNodePos, color=newColor)
         self.net.insertNode(edge, newNode)
 
-    def duplicateNode(self, node=None):
+    def duplicateNode(self, node=None, newNode=None):
+        # if node is defined, select that as the source of parameters
+        # if newNode is defined, select that as the destination for params
         if node is None:
             node = self.net.randomNode()
             if node is None:
@@ -1697,7 +1757,12 @@ class GeneNetwork:
                          newColor.hsva[1],
                          newColor.hsva[2],
                          newColor.hsva[3])
-        newNode = self.addGene(newNodePos, color=newColor, copy=node)
+        if newNode is None:
+            newNode = self.addGene(newNodePos, color=newColor, copy=node)
+        else:
+            self.locs[newNode] = newNodePos
+            self.colors[newNode] = newColor
+
         self.net.duplicateNode(node, newNode)
 
     def duplicateNodeGroup(self, nodeRange=None):
@@ -1744,13 +1809,32 @@ class GeneNetwork:
         if newIndex is None:
             newIndex = random.randrange(self.n)
 
-        # make copy of params
-        self.addGene(nodeExists=True, copy=oldIndex, newIndex=newIndex)
-        # modify network
-        self.net.changeNodeIndex(oldIndex, newIndex)
+        # # make copy of params
+        # self.addGene(copy=oldIndex, newIndex=newIndex)
+        # # modify network
+        # self.net.changeNodeIndex(oldIndex, newIndex)
 
+        # duplicate node, then remove original
+        newNode = self.addGene(copy=oldIndex, newIndex=newIndex)
+        self.duplicateNode(oldIndex, newNode)
         # remove old gene
         self.removeGene(oldIndex)
+
+    def rebuildBox2DEdgeJoints(self, world):
+
+        for joint in self.box2DJoints:
+            world.DestroyJoint(joint)
+
+        self.box2DJoints = []
+
+        for edge in self.net.edgeList:
+            self.world.CreateDistanceJoint(
+                bodyA=self.box2DBodies[edge[0][0]],
+                bodyB=self.box2DBodies[edge[0][1]],
+                anchorA=self.locs[edge[0][0]],
+                anchorB=self.locs[edge[0][1]],
+                collideConnected=True,
+                length=self.node_r * 3)
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
@@ -2570,7 +2654,6 @@ loadLevel(levelNames[0], bridgeObj, levelBackground, screen)
 geneNetworkBackground.fill((255, 255, 255))
 
 
-geneNetwork = GeneNetwork()
 
 # --- pybox2d world setup ---
 # Create the world
@@ -2578,6 +2661,7 @@ world = Box2D.b2World(gravity=(0, -10), doSleep=True)
 
 # list of bodies for simulation
 
+geneNetwork = GeneNetwork(world)
 
 pr = cProfile.Profile()
 pr.enable()
@@ -2643,6 +2727,9 @@ while running:
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         geneNetwork.update(dt)
+        # Make Box2D simulate the physics of our world for one step.
+        world.Step(TIME_STEP, 30, 30)
+        SimulatorVars.steps += 1
 
     # Render to the screen
 
@@ -2675,6 +2762,9 @@ while running:
         # clear the screen
         screen.blit(geneNetworkBackground, (0, 0))
         geneNetwork.render(screen)
+
+        if debug:
+            drawBox2dDebug(world, screen)
 
     # Flip buffers
     pygame.display.flip()
