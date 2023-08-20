@@ -1584,17 +1584,13 @@ class GeneNetwork:
     indicatorColor_k2 = (255, 0, 0)
     f = None
 
-    def __init__(self, world):
+    def __init__(self):
         self.n = 0
         self.z = []
         self.locs = []
         self.colors = []
         self.displayIndicators = []
         self.net = network.RegulatoryNetwork(0)
-
-        self.world = world
-        self.box2DBodies = []
-        self.box2DJoints = []
 
         self.pan = [0, 0]
         self.zoom = 1
@@ -1629,17 +1625,6 @@ class GeneNetwork:
                 color.hsva = (random.uniform(0, 360), 80, 50)
                 # self.colors.insert(newIndex, newColor)
         self.colors.insert(newIndex, color)
-
-        # create physics body and collider shape
-        self.box2DBodies.insert(
-            newIndex,
-            self.world.CreateDynamicBody(
-                position=self.locs[newIndex],
-                shapes=[Box2D.b2CircleShape(
-                    radius=self.node_r)],
-                shapeFixture=Box2D.b2FixtureDef(
-                    density=1,
-                    friction=1)))
 
         self.displayIndicators.insert(newIndex, False)
 
@@ -1706,6 +1691,7 @@ class GeneNetwork:
     # negate weight
     # scale parameter (k1, b, k2)
     # negate bias
+    # merge nodes, combine their edges and parameters
 
     def splitEdge(self, edge=None):
         # edge is a tuple (i, j) of parent indexes
@@ -1716,9 +1702,18 @@ class GeneNetwork:
             if edge is None:
                 # if there are no edges, stop
                 return
+        else:
+            edge = ((edge[0], edge[1]), self.net.getWeight(edge))
 
-        newNodePos = vdiv(vsum(self.locs[edge[0][0]],
-                               self.locs[edge[0][1]]), 2)
+        if edge[0][0] == edge[0][1]:
+            # this is a loopback edge, offset the new node
+            newNodePos = vsum(self.locs[edge[0][0]],
+                              vmul(u(random.uniform(0, math.pi * 2)),
+                              self.node_r * 3))
+        else:
+            # this is a standard edge, make position average of parents
+            newNodePos = vdiv(vsum(self.locs[edge[0][0]],
+                                   self.locs[edge[0][1]]), 2)
         # mix the colors of the two parent nodes
         hue1 = self.colors[edge[0][0]].hsva[0]
         hue2 = self.colors[edge[0][1]].hsva[0]
@@ -1748,7 +1743,7 @@ class GeneNetwork:
         # position the new node randomly offset from old one
         newNodePos = vsum(self.locs[node],
                           vmul(u(random.uniform(0, math.pi * 2)),
-                          self.node_r * 3))
+                          self.node_r * 1.5))
         # generate a color offset from old node
         newColor = pygame.Color(self.colors[node])
         newHue = (newColor.hsva[0] +
@@ -1819,22 +1814,6 @@ class GeneNetwork:
         self.duplicateNode(oldIndex, newNode)
         # remove old gene
         self.removeGene(oldIndex)
-
-    def rebuildBox2DEdgeJoints(self, world):
-
-        for joint in self.box2DJoints:
-            world.DestroyJoint(joint)
-
-        self.box2DJoints = []
-
-        for edge in self.net.edgeList:
-            self.world.CreateDistanceJoint(
-                bodyA=self.box2DBodies[edge[0][0]],
-                bodyB=self.box2DBodies[edge[0][1]],
-                anchorA=self.locs[edge[0][0]],
-                anchorB=self.locs[edge[0][1]],
-                collideConnected=True,
-                length=self.node_r * 3)
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
@@ -2661,7 +2640,7 @@ world = Box2D.b2World(gravity=(0, -10), doSleep=True)
 
 # list of bodies for simulation
 
-geneNetwork = GeneNetwork(world)
+geneNetwork = GeneNetwork()
 
 pr = cProfile.Profile()
 pr.enable()
@@ -2727,9 +2706,6 @@ while running:
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         geneNetwork.update(dt)
-        # Make Box2D simulate the physics of our world for one step.
-        world.Step(TIME_STEP, 30, 30)
-        SimulatorVars.steps += 1
 
     # Render to the screen
 
@@ -2762,9 +2738,6 @@ while running:
         # clear the screen
         screen.blit(geneNetworkBackground, (0, 0))
         geneNetwork.render(screen)
-
-        if debug:
-            drawBox2dDebug(world, screen)
 
     # Flip buffers
     pygame.display.flip()

@@ -28,7 +28,7 @@ class RegulatoryNetwork:
     def __init__(self,
                  n,
                  k1=None,
-                 w=None,
+                 edgeList=None,
                  b=None,
                  k2=None
                  ):
@@ -42,15 +42,14 @@ class RegulatoryNetwork:
         '''
         # initalize internal neural network parameters
         self.n = n
-        self.edgeList = {}
         if k1 is None:
             self.k1 = [1 for x in range(n)]
         else:
             self.k1 = k1
-        if w is None:
-            self.w = [[0 for x in range(n)] for y in range(n)]
+        if edgeList is None:
+            self.edgeList = {}
         else:
-            self.w = w
+            self.edgeList = edgeList
         if b is None:
             self.b = [1 for x in range(n)]
         else:
@@ -64,23 +63,21 @@ class RegulatoryNetwork:
         # set the weight with parents j, i
         # and maintain the edge list for fast looping
         # change weight of edge directed from node j to node i
-        if self.w[i][j] == 0:
+        if (i, j) in self.edgeList:
             if wij == 0:
-                # no change
-                pass
+                # delete the existing edge
+                del self.edgeList[(i, j)]
             else:
-                # adding new weight
-                self.edgeList.update([((i, j), wij)])
-                pass
-        elif wij == 0:
-            # deleting weight
-            del self.edgeList[(i, j)]
-            pass
+                # change the existing edge
+                self.edgeList[(i, j)] = wij
         else:
-            # just changing the weight
-            self.edgeList.update([((i, j), wij)])
+            if wij != 0:
+                # add a new edge
+                self.edgeList[(i, j)] = wij
+            else:
+                # don't add empty edges
+                pass
 
-        self.w[i][j] = wij
         # some possible mutations using this function:
         # • randomize proportional to current value. This modifies the strength
         # of intereaction one morphogen has on another only if they already
@@ -90,16 +87,13 @@ class RegulatoryNetwork:
         # • set weight to some small number besides zero if it was already
         # zero, making a new interaction
 
-        # probably would be much faster to store a list of edges
-        # with a reference to their parent's index values and it's
-        # weight
-
     def getWeight(self, i, j):
-        try:
+        if (i, j) in self.edgeList:
+            # return the value of existing edge
             return self.edgeList[(i, j)]
-        except KeyError:
+        else:
+            # return 0, the weight of non-edges
             return 0
-        # return self.w[i][j]
 
     def addGene(self,
                 k1=None,
@@ -119,7 +113,29 @@ class RegulatoryNetwork:
         the weight the new substance has on itself.
         '''
 
-        if newIndex is None:
+        if newIndex is not None:
+            # with a newIndex that is not self.n the edge list will be outdated
+            # offset any index in the edge list if it is equal to or greater
+            # than newIndex
+            newEdgeList = {}
+            for (parents, weight) in self.edgeList.items():
+                newParents = parents
+                if parents[0] >= newIndex and parents[1] >= newIndex:
+                    # both parents are larger than new index
+                    newParents = (parents[0] + 1, parents[1] + 1)
+                elif parents[0] >= newIndex:
+                    # first parent is larger
+                    newParents = (parents[0] + 1, parents[1])
+                elif parents[1] >= newIndex:
+                    # second parent is larger
+                    newParents = (parents[0], parents[1] + 1)
+                # add edge
+                newEdgeList[newParents] = weight
+            # update the edge list
+            self.edgeList = newEdgeList
+
+        else:
+            # otherwise, append the new node to the end. edges are preserved
             newIndex = self.n
 
         self.n += 1
@@ -143,21 +159,13 @@ class RegulatoryNetwork:
             self.b.insert(newIndex, self.b[copy])
             self.k2.insert(newIndex, self.k2[copy])
 
-        # fill with zeros, no connections between the old nodes and the
-        # new nodes, blank slate
-        for i in range(self.n-1):
-            self.w[i].insert(newIndex, 0)
-        self.w.insert(newIndex, [0 for i in range(self.n)])
-
         # then modify w and weightList using setWeight() and the new data if
         # there is any
         if w is not None and w2 is not None:
             # first add an entry on the inputs to every other node
             for (i, w2i) in enumerate(w2):
-                # self.w[i].append(w2i)
                 self.setWeight(i, newIndex, w2i)
             # then add an entire row of inputs for the new node
-            # self.w.append(w)
             for (j, wi) in enumerate(w):
                 self.setWeight(newIndex, j, wi)
 
@@ -172,35 +180,33 @@ class RegulatoryNetwork:
             self.b.pop(i)
             self.k2.pop(i)
 
-            # remove the input from gene i from all other nodes
-            for jl in self.w:
-                # modify the weight list for inputs from i
-                jl.pop(i)
-
-            # remove entire row on inputs for i
-            self.w.pop(i)
             # entire edge list must be re-keyed since all indexes changed.
-
-            newEdges = []
+            # edges that involve the node being deleted must also be deleted
+            newEdgeList = {}
             for (parents, weight) in self.edgeList.items():
-                newParent1 = parents[0]
-                newParent2 = parents[1]
-                # make sure this edge is not being deleted.
-                if parents[0] != i and parents[1] != i:
-                    if parents[0] > i:
-                        # this parent was moved. The index is now one less
-                        newParent1 -= 1
-                    if parents[1] > i:
-                        newParent2 -= 1
-
-                    # only add the edge if it's not deleted
-                    newEdges.append(((newParent1, newParent2),
-                                     weight))
+                newParents = parents
+                if parents[0] == i or parents[1] == i:
+                    # this edge must not be copied over, it involves to node
+                    # being deleted.
+                    continue
+                elif parents[0] > i and parents[1] > i:
+                    # both parents are larger than new index
+                    newParents = (parents[0] - 1, parents[1] - 1)
+                elif parents[0] > i:
+                    # first parent is larger
+                    newParents = (parents[0] - 1, parents[1])
+                elif parents[1] > i:
+                    # second parent is larger
+                    newParents = (parents[0], parents[1] - 1)
+                # add edge
+                newEdgeList[newParents] = weight
+            # update the edge list
+            self.edgeList = newEdgeList
 
             self.n -= 1
-            # Update edgeList to contain the new keys
-            self.edgeList = dict(newEdges)
 
+    # TODO: modify these functions so the index of the new nodes is related to
+    #   the derivitive nodes
     # now, some more organic network modification functions
     # split edge    create new node in place of an edge (insertNode)
     # flip edge
@@ -255,36 +261,30 @@ class RegulatoryNetwork:
         if node is None:
             node = self.randomNode()
             if node is None:
+                # there are no nodes to copy
                 return
         if newNode is None:
-            # copy node
+            # copy node,
+            # TODO: with an index adjacent to the old node, without breaking
+            #   edge duplication code
             newNode = self.addGene(copy=node)
 
         # copy all the incomming edges on node to newNode
         # except self nodes, convert those so they don't connect the clones
         # but instead connect the newNode to itself
-        for (j, weight) in enumerate(self.w[node].copy()):
-            if weight == 0:
-                continue
-
-            if j == node:
-                # loopback weight, create a loopback weight on newNode
+        for (parents, weight) in self.edgeList.copy().items():
+            if parents[0] == node and parents[1] == node:
+                # loop back weight
                 self.setWeight(newNode, newNode, weight)
+            elif parents[0] == node:
+                # pointed at old node, so point an edge at new node
+                self.setWeight(newNode, parents[1], weight)
+            elif parents[1] == node:
+                # pointed from old node, so point an edge from new node
+                self.setWeight(parents[0], newNode, weight)
             else:
-                # copy the weigts over, pointing to newNode
-                self.setWeight(newNode, j, weight)
-        # then copy the outgoing edges point from newNode
-        # skip self edges
-        for (i, weights) in enumerate(self.w.copy()):
-            if weights[node] == 0:
-                # skip
-                continue
-
-            if i == node:
-                # skip loopback edge
-                continue
-
-            self.setWeight(i, newNode, weights[node])
+                # not related to node being copied, so don't bother it
+                pass
 
         # return new node
         return newNode
@@ -331,51 +331,36 @@ class RegulatoryNetwork:
         for node in oldNodes:
             self.addGene(copy=node)
 
-        # Then duplicate edge structure
-        for (index, oldNode) in enumerate(oldNodes):
-            newNode = newNodes[index]
+        # classify every edge
+        #   inter group edges: duplicate onto new group
+        #   group -> external: duplicate newgroup -> external
+        #   external -> group: duplicate external -> newgroup
+        #   external -> external: do nothing, skip
+        # and duplicate the edge structure accordingly
+        for (parents, weight) in self.edgeList.copy().items():
 
-            # edges pointing to oldNode
-            for (j, weight) in enumerate(self.w[oldNode].copy()):
-                if weight == 0:
-                    # skip
-                    continue
+            parent0_internal = parents[0] >= nodeRange[0] and\
+                               parents[0] <= nodeRange[1]
+            parent1_internal = parents[1] >= nodeRange[0] and\
+                               parents[1] <= nodeRange[1]
+            # these are valid if corrisponding parent is in-group
+            # maps the old group indexes to their duplicates in the new group
+            newi = parents[0] - nodeRange[0] + copyRange[0]
+            newj = parents[1] - nodeRange[0] + copyRange[0]
 
-                # check it the edge is coming from oldNode (loopback) inside
-                # the group (nodeRange) or outside.
-                if j == oldNode:
-                    # loopback edge
-                    self.setWeight(newNode, newNode, weight)
-                elif j >= nodeRange[0] and j <= nodeRange[1]:
-                    # edge comes from inside the group, so it should come from
-                    # the corrisponding edge in the new group
-                    newj = j - nodeRange[0] + copyRange[0]
-                    self.setWeight(newNode, newj, weight)
-                else:
-                    # edge comes from outside the duplicated range.
-                    self.setWeight(newNode, j, weight)
-
-            # now duplicate edges pointing away from oldNode
-            for (i, inputs) in enumerate(self.w.copy()):
-                weight = inputs[oldNode]
-                if weight == 0:
-                    # skip
-                    continue
-
-                # check it the edge is going to oldNode (loopback) inside
-                # the group (nodeRange) or outside.
-                if i == oldNode:
-                    # loopback edge, skip
-                    # self.setWeight(newNode, newNode, weight)
-                    continue
-                if i >= nodeRange[0] and i <= nodeRange[1]:
-                    # edge points inside the group, so it should point to
-                    # the corrisponding edge in the new group
-                    newi = i - nodeRange[0] + copyRange[0]
-                    self.setWeight(newi, newNode, weight)
-                else:
-                    # edge points outside the duplicated range.
-                    self.setWeight(i, newNode, weight)
+            if not parent0_internal and not parent1_internal:
+                # edge is external -> external, skip
+                continue
+            if parent0_internal and parent1_internal:
+                # edge is internal -> internal, intergroup
+                # duplicate onto new group
+                self.setWeight(newi, newj, weight)
+            elif parent0_internal:
+                # group -> external
+                self.setWeight(newi, parents[1], weight)
+            elif parent1_internal:
+                # external -> group
+                self.setWeight(parents[0], newj, weight)
 
         # returns the range of old nodes
         # new nodes are appended, same length as old nodes
@@ -387,6 +372,11 @@ class RegulatoryNetwork:
             oldIndex = random.randrange(self.n)
         if newIndex is None:
             newIndex = random.randrange(self.n)
+
+        if newIndex > oldIndex:
+            # if the new index will be offset when we delete the old node,
+            # shift it by one.
+            newIndex += 1
 
         # duplicate parameters into custom index
         newNode = self.addGene(copy=oldIndex, newIndex=newIndex)
