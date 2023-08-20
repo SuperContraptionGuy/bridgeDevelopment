@@ -1234,7 +1234,7 @@ def geneNetworkEventHandler(event, geneNetwork):
                     case pygame.K_z:
                         # Zap!
                         # choose a random mutation to apply to the network.
-                        mutationIndex = random.randrange(6)
+                        mutationIndex = random.randrange(5)
                         match mutationIndex:
                             case 0:
                                 print("splitEdge")
@@ -1253,8 +1253,10 @@ def geneNetworkEventHandler(event, geneNetwork):
                                 geneNetwork.net.flipEdge()
                             case 5:
                                 print("removeGene")
-                                geneNetwork.removeGene(
-                                    geneNetwork.net.randomNode())
+                                geneNetwork.removeGene()
+                            case 6:
+                                print("removeGeneGroup")
+                                geneNetwork.removeGeneGroup()
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:
