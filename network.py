@@ -289,7 +289,7 @@ class RegulatoryNetwork:
         # return new node
         return newNode
 
-    def duplicateNodeGroup(self, nodeRange=None, meanLength=3):
+    def duplicateNodeGroup(self, nodeRange=None, newIndex=None, meanLength=3):
         '''
         nodeRange is a tuple with the index of two nodes. Those nodes and
         all the noded between them will be duplicated
@@ -322,14 +322,50 @@ class RegulatoryNetwork:
             if nodeRange[0] > nodeRange[1]:
                 nodeRange = (nodeRange[1], nodeRange[0])
 
-        copyRange = (self.n, self.n + nodeRange[1] - nodeRange[0])
+        if newIndex is None:
+            # can be any index in self.n, including self.n (after everything)
+            newIndex = random.randrange(self.n + 1)
 
-        oldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
+        copyRange = (newIndex, newIndex + nodeRange[1] - nodeRange[0])
+
+        copyLength = nodeRange[1] - nodeRange[0] + 1
+        if copyRange[0] <= nodeRange[0]:
+            # new nodes entirely ahead of old ones, offset entire old range
+            oldNodes = list(range(nodeRange[0] + copyLength,
+                                  nodeRange[1] + copyLength + 1))
+        elif copyRange[0] <= nodeRange[1]:
+            # new nodes are nested within old range, offset some of them
+            oldNodes = list(range(nodeRange[0],
+                                  copyRange[0]))
+            oldNodes.extend(list(range(copyRange[1] + 1,
+                                       nodeRange[1] + copyLength + 1)))
+        else:
+            # new range is after old one, so no offset occurs
+            oldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
         newNodes = list(range(copyRange[0], copyRange[1] + 1))
 
         # duplicate each node, with properties
-        for node in oldNodes:
-            self.addGene(copy=node)
+        for (index, node) in enumerate(oldNodes):
+            self.addGene(copy=node,
+                         newIndex=newNodes[index])
+
+        # now create the copies. the results after should be in the positions
+        # specified by oldNodes and newNodes
+        oldNodeIndex = nodeRange[0]
+        newNodeIndex = copyRange[0]
+        for i in range(nodeRange[0], nodeRange[1] + 1):
+            self.addGene(copy=oldNodeIndex, newIndex=newNodeIndex)
+            oldNodeIndex += 1
+            newNodeIndex += 1
+            if oldNodeIndex == copyRange[0]:
+                # In this case, the new range is right in the middle
+                # of the old range, so skip to the end of the range (i + 1)
+                # and add twice for every iteration afterwards (next if)
+                oldNodeIndex += i + 1
+            if oldNodeIndex > copyRange[0]:
+                # if old index is after the new one, it will offset twice
+                # every iteration, so here's a second addition
+                oldNodeIndex += 1
 
         # classify every edge
         #   inter group edges: duplicate onto new group

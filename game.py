@@ -1760,12 +1760,44 @@ class GeneNetwork:
 
         self.net.duplicateNode(node, newNode)
 
-    def duplicateNodeGroup(self, nodeRange=None):
+    def duplicateNodeGroup(self, nodeRange=None, newIndex=None,
+                           meanLength=3):
         # duplicate nodeRange, or a random range if nodeRange is None
+
+        if nodeRange is None:
+            # choose random range, with a mean length
+            r1 = random.randrange(self.n)
+            length = int(random.gauss(0, meanLength))
+
+            if length >= 0:
+                if r1 + length < self.n:
+                    # within range
+                    nodeRange = (r1, r1 + length)
+                else:
+                    # go all the way to the end
+                    nodeRange = (r1, self.n - 1)
+            else:
+                if r1 + length >= 0:
+                    nodeRange = (r1 + length, r1)
+                else:
+                    # go to the end
+                    nodeRange = (0, r1)
+        else:
+            # make sure the first index is smaller than or equal to the second
+            if nodeRange[0] > nodeRange[1]:
+                nodeRange = (nodeRange[1], nodeRange[0])
+
+        if newIndex is None:
+            newIndex = random.randrange(self.n -
+                                        (nodeRange[1] - nodeRange[0]))
+
         oldNodesRange = self.net.duplicateNodeGroup(nodeRange)
 
         oldNodes = list(range(oldNodesRange[0], oldNodesRange[1] + 1))
+
         newNodesRange = (self.n, self.n + oldNodesRange[1] - oldNodesRange[0])
+        newNodesRange = (newIndex, newIndex + oldNodesRange[1] - oldNodesRange[0])
+
         newNodes = list(range(newNodesRange[0], newNodesRange[1] + 1))
 
         # calculate extent of node group to allow offset
@@ -1814,6 +1846,17 @@ class GeneNetwork:
         self.duplicateNode(oldIndex, newNode)
         # remove old gene
         self.removeGene(oldIndex)
+
+    def changeNodeGroupIndex(self, nodeRange=None, newIndex=None):
+        # Move a group of node represented by nodeRange to a new index position
+        # new index has a range from 0 to self.n - (nodeRange[1] - nodeRange[0]
+
+        if nodeRange is None:
+            pass
+        if newIndex is None:
+            pass
+
+        pass
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
