@@ -257,7 +257,7 @@ class RegulatoryNetwork:
         self.setWeight(edge[0][1], edge[0][0], edge[1])
         self.setWeight(edge[0][0], edge[0][1], tmpWeight)
 
-    def duplicateNode(self, node=None, newNode=None):
+    def duplicateNode(self, node=None, newNode=None, newIndex=None):
         if node is None:
             node = self.randomNode()
             if node is None:
@@ -267,7 +267,11 @@ class RegulatoryNetwork:
             # copy node,
             # TODO: with an index adjacent to the old node, without breaking
             #   edge duplication code
-            newNode = self.addGene(copy=node)
+            newNode = self.addGene(copy=node, newIndex=newIndex)
+            if newIndex <= node:
+                # the newGene offset the original, so adjust node's index to
+                # point to the actual old node
+                node += 1
 
         # copy all the incomming edges on node to newNode
         # except self nodes, convert those so they don't connect the clones
@@ -299,24 +303,11 @@ class RegulatoryNetwork:
         # will be duplicated onto the new group. edges between nodes
         # within and nodes without the group will be duplicated to point
         # to/from the same outside nodes from/to the new node group
+        if self.n == 0:
+            # can't do anything with no nodes
+            return (None, None, None)
         if nodeRange is None:
-            # choose random range, with a mean length
-            r1 = random.randrange(self.n)
-            length = int(random.gauss(0, meanLength))
-
-            if length >= 0:
-                if r1 + length < self.n:
-                    # within range
-                    nodeRange = (r1, r1 + length)
-                else:
-                    # go all the way to the end
-                    nodeRange = (r1, self.n - 1)
-            else:
-                if r1 + length >= 0:
-                    nodeRange = (r1 + length, r1)
-                else:
-                    # go to the end
-                    nodeRange = (0, r1)
+            nodeRange = self.randomNodeRange(meanLength)
         else:
             # make sure the first index is smaller than or equal to the second
             if nodeRange[0] > nodeRange[1]:
@@ -342,18 +333,14 @@ class RegulatoryNetwork:
         else:
             # new range is after old one, so no offset occurs
             oldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
+        originalOldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
         newNodes = list(range(copyRange[0], copyRange[1] + 1))
-
-        # duplicate each node, with properties
-        for (index, node) in enumerate(oldNodes):
-            self.addGene(copy=node,
-                         newIndex=newNodes[index])
 
         # now create the copies. the results after should be in the positions
         # specified by oldNodes and newNodes
         oldNodeIndex = nodeRange[0]
         newNodeIndex = copyRange[0]
-        for i in range(nodeRange[0], nodeRange[1] + 1):
+        for i in range(copyLength):
             self.addGene(copy=oldNodeIndex, newIndex=newNodeIndex)
             oldNodeIndex += 1
             newNodeIndex += 1
@@ -362,7 +349,7 @@ class RegulatoryNetwork:
                 # of the old range, so skip to the end of the range (i + 1)
                 # and add twice for every iteration afterwards (next if)
                 oldNodeIndex += i + 1
-            if oldNodeIndex > copyRange[0]:
+            elif oldNodeIndex > copyRange[0]:
                 # if old index is after the new one, it will offset twice
                 # every iteration, so here's a second addition
                 oldNodeIndex += 1
@@ -375,14 +362,21 @@ class RegulatoryNetwork:
         # and duplicate the edge structure accordingly
         for (parents, weight) in self.edgeList.copy().items():
 
-            parent0_internal = parents[0] >= nodeRange[0] and\
-                               parents[0] <= nodeRange[1]
-            parent1_internal = parents[1] >= nodeRange[0] and\
-                               parents[1] <= nodeRange[1]
+            # parent0_internal = parents[0] >= nodeRange[0] and\
+            #                    parents[0] <= nodeRange[1]
+            # parent1_internal = parents[1] >= nodeRange[0] and\
+            #                    parents[1] <= nodeRange[1]
+            parent0_internal = parents[0] in oldNodes
+            parent1_internal = parents[1] in oldNodes
+
             # these are valid if corrisponding parent is in-group
             # maps the old group indexes to their duplicates in the new group
-            newi = parents[0] - nodeRange[0] + copyRange[0]
-            newj = parents[1] - nodeRange[0] + copyRange[0]
+            # newi = parents[0] - nodeRange[0] + copyRange[0]
+            # newj = parents[1] - nodeRange[0] + copyRange[0]
+            if parent0_internal:
+                newi = newNodes[oldNodes.index(parents[0])]
+            if parent1_internal:
+                newj = newNodes[oldNodes.index(parents[1])]
 
             if not parent0_internal and not parent1_internal:
                 # edge is external -> external, skip
@@ -398,16 +392,16 @@ class RegulatoryNetwork:
                 # external -> group
                 self.setWeight(parents[0], newj, weight)
 
-        # returns the range of old nodes
-        # new nodes are appended, same length as old nodes
-        return nodeRange
+        # returns the list of original oldnodes,
+        # old nodes and new nodes, mapped
+        return (originalOldNodes, oldNodes, newNodes)
 
     def changeNodeIndex(self, oldIndex=None, newIndex=None):
         ''' Move a node. Returns an updated position of the newIndex'''
         if oldIndex is None:
-            oldIndex = random.randrange(self.n)
+            oldIndex = self.randomNode()
         if newIndex is None:
-            newIndex = random.randrange(self.n)
+            newIndex = self.randomeNode()
 
         if newIndex > oldIndex:
             # if the new index will be offset when we delete the old node,
@@ -434,12 +428,59 @@ class RegulatoryNetwork:
         # return the updated index position of the new node
         return newIndex
 
+    def changeNodeGroupIndex(self, nodeRange=None, newIndex=None):
+        '''
+        changes index of nodes in nodeRange to start from newIndex.
+        newIndex must be between 0 and self.n - (nodeRange[1] - nodeRange[0]+1)
+        '''
+
+        if newIndex > nodeRange[0]:
+            # new index should be offset past nodeRange, so that when nodeRange
+            # is deleted, the index of  the duplicated range starts at the
+            # original newIndex
+            newIndex += nodeRange[1] - nodeRange[0] + 1
+            # because of this, newIndex cannot be greater than
+            # self.n - lengthOfnodeRange
+
+        (originalOldNodes, oldNodes, newNodes) = \
+            self.duplicateNodeGroup(nodeRange, newIndex)
+
+        oldNodeIndex = oldNodes[0]
+        copyLength = newNodes[-1] - newNodes[0] + 1
+        for i in range(copyLength):
+            self.removeGene(oldNodeIndex)
+            if oldNodeIndex == newNodes[0]:
+                # In this case, the new range is right in the middle
+                # of the old range, so skip to the end of the range
+                oldNodeIndex += copyLength
+
     def randomNode(self):
         if self.n == 0:
             return None
             # random.randrange(
         ret = random.randrange(self.n)
         return ret
+
+    def randomNodeRange(self, meanLength=3):
+        # choose random range, with a mean length
+        r1 = self.randomNode()
+        length = int(random.gauss(0, meanLength))
+
+        if length >= 0:
+            if r1 + length < self.n:
+                # within range
+                nodeRange = (r1, r1 + length)
+            else:
+                # go all the way to the end
+                nodeRange = (r1, self.n - 1)
+        else:
+            if r1 + length >= 0:
+                nodeRange = (r1 + length, r1)
+            else:
+                # go to the end
+                nodeRange = (0, r1)
+
+        return nodeRange
 
     def randomEdge(self):
         # choose random edge

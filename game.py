@@ -1639,14 +1639,26 @@ class GeneNetwork:
         # return the index of new node
         return newIndex
 
-    def removeGene(self, i):
+    def removeGene(self, i=None):
         if self.n > 0:
+            if i is None:
+                i = self.net.randomNode()
+                if i is None:
+                    return
             self.n -= 1
             self.z.pop(i)
             self.locs.pop(i)
             self.colors.pop(i)
             self.displayIndicators.pop(i)
             self.net.removeGene(i)
+
+    def removeGeneGroup(self, nodeRange=None):
+        if nodeRange is None:
+            nodeRange = self.net.randomNodeRange()
+
+        index = nodeRange[0]
+        for node in range(nodeRange[0], nodeRange[1] + 1):
+            self.removeGene(index)
 
     def cordsToScreen(self, loc):
         # return vsub(vmul(loc, self.zoom), self.pan)
@@ -1732,7 +1744,7 @@ class GeneNetwork:
         newNode = self.addGene(newNodePos, color=newColor)
         self.net.insertNode(edge, newNode)
 
-    def duplicateNode(self, node=None, newNode=None):
+    def duplicateNode(self, node=None, newNode=None, newIndex=None):
         # if node is defined, select that as the source of parameters
         # if newNode is defined, select that as the destination for params
         if node is None:
@@ -1753,60 +1765,32 @@ class GeneNetwork:
                          newColor.hsva[2],
                          newColor.hsva[3])
         if newNode is None:
-            newNode = self.addGene(newNodePos, color=newColor, copy=node)
+            newNode = self.addGene(newNodePos, color=newColor, copy=node,
+                                   newIndex=newIndex)
         else:
             self.locs[newNode] = newNodePos
             self.colors[newNode] = newColor
 
-        self.net.duplicateNode(node, newNode)
+        self.net.duplicateNode(node, newNode, newIndex)
 
     def duplicateNodeGroup(self, nodeRange=None, newIndex=None,
                            meanLength=3):
         # duplicate nodeRange, or a random range if nodeRange is None
+        (originalOldNodes, oldNodes, newNodes) = \
+            self.net.duplicateNodeGroup(nodeRange, newIndex)
 
-        if nodeRange is None:
-            # choose random range, with a mean length
-            r1 = random.randrange(self.n)
-            length = int(random.gauss(0, meanLength))
-
-            if length >= 0:
-                if r1 + length < self.n:
-                    # within range
-                    nodeRange = (r1, r1 + length)
-                else:
-                    # go all the way to the end
-                    nodeRange = (r1, self.n - 1)
-            else:
-                if r1 + length >= 0:
-                    nodeRange = (r1 + length, r1)
-                else:
-                    # go to the end
-                    nodeRange = (0, r1)
-        else:
-            # make sure the first index is smaller than or equal to the second
-            if nodeRange[0] > nodeRange[1]:
-                nodeRange = (nodeRange[1], nodeRange[0])
-
-        if newIndex is None:
-            newIndex = random.randrange(self.n -
-                                        (nodeRange[1] - nodeRange[0]))
-
-        oldNodesRange = self.net.duplicateNodeGroup(nodeRange)
-
-        oldNodes = list(range(oldNodesRange[0], oldNodesRange[1] + 1))
-
-        newNodesRange = (self.n, self.n + oldNodesRange[1] - oldNodesRange[0])
-        newNodesRange = (newIndex, newIndex + oldNodesRange[1] - oldNodesRange[0])
-
-        newNodes = list(range(newNodesRange[0], newNodesRange[1] + 1))
+        if originalOldNodes is None or \
+            oldNodes is None or \
+                newNodes is None:
+            return
 
         # calculate extent of node group to allow offset
         # measure distance between all nodes in group
         # store largest distance, as a vector
         maxDist = self.node_r * 2
         maxDistVec = vmul(u(random.vonmisesvariate(0, 0)), maxDist)
-        for node1 in oldNodes:
-            for node2 in oldNodes:
+        for node1 in originalOldNodes:
+            for node2 in originalOldNodes:
                 vec = vsub(self.locs[node1], self.locs[node2])
                 dist = vmag(vec)
                 if dist > maxDist:
@@ -1817,20 +1801,37 @@ class GeneNetwork:
         offset = vperp(vmul(maxDistVec, 0.5))
         hueOffset = random.vonmisesvariate(0, 8) * 360 / 2 / math.pi
         # generate properties of new nodes
-        for (i, node) in enumerate(newNodes):
+        oldNodeIndex = originalOldNodes[0]
+        newNodeIndex = newNodes[0]
+        for i in range(len(newNodes)):
             # generate a color offset from the corrisponding old node
-            newColor = pygame.Color(self.colors[oldNodes[i]])
+            newColor = pygame.Color(self.colors[oldNodeIndex])
             newHue = (newColor.hsva[0] + hueOffset) % 360
             newColor.hsva = (newHue,
                              newColor.hsva[1],
                              newColor.hsva[2],
                              newColor.hsva[3])
-
-            self.addGene(vsum(self.locs[oldNodes[i]], offset),
+            self.addGene(vsum(self.locs[oldNodeIndex], offset),
                          nodeExists=True,
-                         color=newColor)
+                         color=newColor,
+                         newIndex=newNodeIndex)
+            oldNodeIndex += 1
+            newNodeIndex += 1
+            if oldNodeIndex == newNodes[0]:
+                # In this case, the new range is right in the middle
+                # of the old range, so skip to the end of the range (i + 1)
+                # and add twice for every iteration afterwards (next if)
+                oldNodeIndex += i + 1
+            elif oldNodeIndex > newNodes[0]:
+                # if old index is after the new one, it will offset twice
+                # every iteration, so here's a second addition
+                oldNodeIndex += 1
 
     def changeNodeIndex(self, oldIndex=None, newIndex=None):
+        '''
+        change the index of node at oldIndex to newIndex.
+        newIndex max value is self.n - 1
+        '''
         if oldIndex is None:
             oldIndex = random.randrange(self.n)
         if newIndex is None:
@@ -1841,9 +1842,20 @@ class GeneNetwork:
         # # modify network
         # self.net.changeNodeIndex(oldIndex, newIndex)
 
+        if newIndex > oldIndex:
+            # the new node will be offset when the old node is deleted, so
+            # compensate for it
+            newIndex += 1
+            # because of this, newIndex maximum is self.n - 1
+
         # duplicate node, then remove original
         newNode = self.addGene(copy=oldIndex, newIndex=newIndex)
+        if newIndex <= oldIndex:
+            # old index is offset by the new
+            oldIndex += 1
+        # copy the edges etc.
         self.duplicateNode(oldIndex, newNode)
+
         # remove old gene
         self.removeGene(oldIndex)
 
