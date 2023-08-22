@@ -1153,7 +1153,7 @@ def geneNetworkEventHandler(event, geneNetwork):
                         # Zap!
                         # choose a random mutation to apply to the network.
                         mutationIndex = random.randrange(7)
-                        mutationIndex = 0
+                        mutationIndex = 2
                         match mutationIndex:
                             case 0:
                                 print("splitEdge")
@@ -1558,89 +1558,6 @@ class GeneNetwork:
     # scale parameter (k1, b, k2)
     # negate bias
     # merge nodes, combine their edges and parameters
-
-    def duplicateNode(self, node=None, newNode=None, newIndex=None):
-        # if node is defined, select that as the source of parameters
-        # if newNode is defined, select that as the destination for params
-        if node is None:
-            node = self.net.randomNode()
-            if node is None:
-                return
-
-        # position the new node randomly offset from old one
-        newNodePos = v.sum(self.locs[node],
-                           v.mul(v.u(random.uniform(0, math.pi * 2)),
-                                 self.node_r * 1.5))
-        # generate a color offset from old node
-        newColor = pygame.Color(self.colors[node])
-        newHue = (newColor.hsva[0] +
-                  random.vonmisesvariate(0, 8) * 360 / 2 / math.pi) % 360
-        newColor.hsva = (newHue,
-                         newColor.hsva[1],
-                         newColor.hsva[2],
-                         newColor.hsva[3])
-        if newNode is None:
-            newNode = self.addGene(newNodePos, color=newColor, copy=node,
-                                   newIndex=newIndex)
-        else:
-            self.locs[newNode] = newNodePos
-            self.colors[newNode] = newColor
-
-        self.net.duplicateNode(node, newNode, newIndex)
-
-    def duplicateNodeGroup(self, nodeRange=None, newIndex=None,
-                           meanLength=3):
-        # duplicate nodeRange, or a random range if nodeRange is None
-        (originalOldNodes, oldNodes, newNodes) = \
-            self.net.duplicateNodeGroup(nodeRange, newIndex)
-
-        if originalOldNodes is None or \
-            oldNodes is None or \
-                newNodes is None:
-            return
-
-        # calculate extent of node group to allow offset
-        # measure distance between all nodes in group
-        # store largest distance, as a vector
-        maxDist = self.node_r * 2
-        maxDistVec = v.mul(v.u(random.vonmisesvariate(0, 0)), maxDist)
-        for node1 in originalOldNodes:
-            for node2 in originalOldNodes:
-                vec = v.sub(self.locs[node1], self.locs[node2])
-                dist = v.mag(vec)
-                if dist > maxDist:
-                    maxDist = dist
-                    maxDistVec = vec
-        # offset all the nodes in the new group by an amount perpendicular to
-        # distvec
-        offset = v.perp(v.mul(maxDistVec, 0.5))
-        hueOffset = random.vonmisesvariate(0, 8) * 360 / 2 / math.pi
-        # generate properties of new nodes
-        oldNodeIndex = originalOldNodes[0]
-        newNodeIndex = newNodes[0]
-        for i in range(len(newNodes)):
-            # generate a color offset from the corrisponding old node
-            newColor = pygame.Color(self.colors[oldNodeIndex])
-            newHue = (newColor.hsva[0] + hueOffset) % 360
-            newColor.hsva = (newHue,
-                             newColor.hsva[1],
-                             newColor.hsva[2],
-                             newColor.hsva[3])
-            self.addGene(v.sum(self.locs[oldNodeIndex], offset),
-                         nodeExists=True,
-                         color=newColor,
-                         newIndex=newNodeIndex)
-            oldNodeIndex += 1
-            newNodeIndex += 1
-            if oldNodeIndex == newNodes[0]:
-                # In this case, the new range is right in the middle
-                # of the old range, so skip to the end of the range (i + 1)
-                # and add twice for every iteration afterwards (next if)
-                oldNodeIndex += i + 1
-            elif oldNodeIndex > newNodes[0]:
-                # if old index is after the new one, it will offset twice
-                # every iteration, so here's a second addition
-                oldNodeIndex += 1
 
     def changeNodeIndex(self, oldIndex=None, newIndex=None):
         '''

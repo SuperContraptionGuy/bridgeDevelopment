@@ -123,37 +123,36 @@ class RegulatoryNetwork:
         self.z.insert(newIndex, random.expovariate(1))
         self.displayIndicators.insert(newIndex, False)
 
-        if copy is None:
-            if k1 is not None:
-                self.k1.insert(newIndex, k1)
-            else:
-                self.k1.insert(newIndex, random.expovariate(1))
-            if b is not None:
-                self.b.insert(newIndex, b)
-            else:
-                self.b.insert(newIndex, random.gauss(0, 1))
-            if k2 is not None:
-                self.k2.insert(newIndex, k2)
-            else:
-                self.k2.insert(newIndex, random.expovariate(1))
-            if loc is not None:
-                self.locs.insert(newIndex, loc)
-            else:
-                self.locs.insert(newIndex, (0, 0))
-            if color is not None:
-                self.colors.insert(newIndex, color)
-            else:
-                # choose random color for the new gene
-                color = pygame.Color((0, 0, 0))
-                color.hsva = (random.uniform(0, 360), 80, 50)
-                self.colors.insert(newIndex, color)
-        else:
+        if copy is not None:
             # copy parameters from copy, but not edges
             self.k1.insert(newIndex, self.k1[copy])
             self.b.insert(newIndex, self.b[copy])
             self.k2.insert(newIndex, self.k2[copy])
             self.locs.insert(newIndex, self.locs[copy])
             self.colors.insert(newIndex, pygame.Color(self.colors[copy]))
+
+        else:
+            # populate with default values
+            self.k1.insert(newIndex, random.expovariate(1))
+            self.b.insert(newIndex, random.gauss(0, 1))
+            self.k2.insert(newIndex, random.expovariate(1))
+            self.locs.insert(newIndex, (0, 0))
+            # choose random color for the new gene
+            color = pygame.Color((0, 0, 0))
+            color.hsva = (random.uniform(0, 360), 80, 50)
+            self.colors.insert(newIndex, color)
+
+        # replace copied properties if they are explicitly specified
+        if k1 is not None:
+            self.k1[newIndex] = k1
+        if b is not None:
+            self.b[newIndex] = b
+        if k2 is not None:
+            self.k2[newIndex] = k2
+        if loc is not None:
+            self.locs[newIndex] = loc
+        if color is not None:
+            self.colors[newIndex] = color
 
         # rekey edge list
         newEdgeList = {}
@@ -187,45 +186,49 @@ class RegulatoryNetwork:
         return newIndex
 
     def removeGene(self, i=None):
-        '''Remove gene i'''
-        if self.n > 0:
+        '''
+        Remove gene i and recalculates the edge list to match the shifted
+        indicies
+        '''
+        if self.n == 0:
+            return
+        if i is None:
+            i = self.randomNode()
             if i is None:
-                i = self.randomNode()
-                if i is None:
-                    return
+                return
 
-            self.k1.pop(i)
-            self.b.pop(i)
-            self.k2.pop(i)
-            self.z.pop(i)
-            self.locs.pop(i)
-            self.colors.pop(i)
-            self.displayIndicators.pop(i)
+        self.k1.pop(i)
+        self.b.pop(i)
+        self.k2.pop(i)
+        self.z.pop(i)
+        self.locs.pop(i)
+        self.colors.pop(i)
+        self.displayIndicators.pop(i)
 
-            # entire edge list must be re-keyed since all indexes changed.
-            # edges that involve the node being deleted must also be deleted
-            newEdgeList = {}
-            for (parents, weight) in self.edgeList.items():
-                newParents = parents
-                if parents[0] == i or parents[1] == i:
-                    # this edge must not be copied over, it involves to node
-                    # being deleted.
-                    continue
-                elif parents[0] > i and parents[1] > i:
-                    # both parents are larger than new index
-                    newParents = (parents[0] - 1, parents[1] - 1)
-                elif parents[0] > i:
-                    # first parent is larger
-                    newParents = (parents[0] - 1, parents[1])
-                elif parents[1] > i:
-                    # second parent is larger
-                    newParents = (parents[0], parents[1] - 1)
-                # add edge
-                newEdgeList[newParents] = weight
-            # update the edge list
-            self.edgeList = newEdgeList
+        # entire edge list must be re-keyed since all indexes changed.
+        # edges that involve the node being deleted must also be deleted
+        newEdgeList = {}
+        for (parents, weight) in self.edgeList.items():
+            newParents = parents
+            if parents[0] == i or parents[1] == i:
+                # this edge must not be copied over, it involves to node
+                # being deleted.
+                continue
+            elif parents[0] > i and parents[1] > i:
+                # both parents are larger than new index
+                newParents = (parents[0] - 1, parents[1] - 1)
+            elif parents[0] > i:
+                # first parent is larger
+                newParents = (parents[0] - 1, parents[1])
+            elif parents[1] > i:
+                # second parent is larger
+                newParents = (parents[0], parents[1] - 1)
+            # add edge
+            newEdgeList[newParents] = weight
+        # update the edge list
+        self.edgeList = newEdgeList
 
-            self.n -= 1
+        self.n -= 1
 
     def removeGeneGroup(self, nodeRange=None):
         if nodeRange is None:
@@ -261,8 +264,22 @@ class RegulatoryNetwork:
 
     def splitEdge(self, edge=None, node=None, newIndex=None):
         '''
-        edge is a tuple (i, j) of parent indexes
-        node is the index of the node to insert into the edge
+        Inserts a node inbetween the two parents of edge, replacing the
+        original edge with two edges.
+        Eg.
+        Parent1 <- Parent2
+        Parent1 <- insertedNode <- Parent2
+
+        If edge is not provided, a random edge is chosen
+        edge is tuple, with structure like (parents, weight)
+        and parents is also a tuple like (parent1, parent2)
+
+        If newIndex is provided, that's where the new node will be inserted,
+        otherwise the new node will be inserted between the original parents,
+        or before/after a loopback edge.
+
+        If node is provided, than this existing node will be used, and
+        the edges will be connected to it.
         '''
         # this fuction might break if edge weight is 0
 
@@ -272,7 +289,16 @@ class RegulatoryNetwork:
                 return
         if newIndex is None:
             # select an index between the parent nodes of the edge
-            newIndex = int(math.ceil((edge[0][0] + edge[0][1]) / 2))
+            # or before/after if it's a loopback edge
+            # newIndex = int(math.ceil((edge[0][0] + edge[0][1]) / 2))
+            if edge[0][0] < edge[0][1]:
+                newIndex = random.randrange(edge[0][0] + 1, edge[0][1] + 1)
+            elif edge[0][0] > edge[0][1]:
+                newIndex = random.randrange(edge[0][1] + 1, edge[0][0] + 1)
+            else:
+                # this is a loopback edge, insert before or after
+                newIndex = random.randrange(edge[0][0], edge[0][0] + 1)
+
         if node is None:
             # create a new random node to insert, put it at the end, move
             # later
@@ -314,6 +340,14 @@ class RegulatoryNetwork:
             self.changeNodeIndex(node, newIndex)
 
     def flipEdge(self, edge=None):
+        '''
+        flips the direction of edge.
+
+        If edge is not provided, a random edge is chosen
+
+        edge is tuple, with structure like (parents, weight)
+        and parents is also a tuple like (parent1, parent2)
+        '''
         if edge is None:
             edge = self.randomEdge()
             if edge is None:
@@ -325,20 +359,47 @@ class RegulatoryNetwork:
         self.setWeight(edge[0][0], edge[0][1], tmpWeight)
 
     def duplicateNode(self, node=None, newNode=None, newIndex=None):
+        '''
+        Duplicates a single node with index node to newIndex.
+
+        If newIndex is not provided, then the duplicate will be inserted
+        either directly ahead or directly after node
+
+        If newNode is provided, than a new node is not created, but instead
+        the edge structure on node is duplicated onto newNode.
+        '''
         if node is None:
             node = self.randomNode()
             if node is None:
                 # there are no nodes to copy
                 return
+        if newIndex is None:
+            # if no newIndex is given, add the duplicate node right next to
+            # original node, either before or after it
+            newIndex = node + random.randrange(2)
+
         if newNode is None:
             # copy node,
-            # TODO: with an index adjacent to the old node, without breaking
-            #   edge duplication code
             newNode = self.addGene(copy=node, newIndex=newIndex)
-            if newIndex <= node:
+            if newNode <= node:
                 # the newGene offset the original, so adjust node's index to
                 # point to the actual old node
                 node += 1
+
+        # position the new node randomly offset from old one
+        newNodePos = v.sum(self.locs[node],
+                           v.mul(v.u(random.uniform(0, math.pi * 2)),
+                                 self.node_r * 1.5))
+        # generate a color offset from old node
+        newColor = pygame.Color(self.colors[node])
+        newHue = (newColor.hsva[0] +
+                  random.vonmisesvariate(0, 8) * 360 / 2 / math.pi) % 360
+        newColor.hsva = (newHue,
+                         newColor.hsva[1],
+                         newColor.hsva[2],
+                         newColor.hsva[3])
+        self.locs[newNode] = newNodePos
+        self.colors[newNode] = newColor
 
         # copy all the incomming edges on node to newNode
         # except self nodes, convert those so they don't connect the clones
@@ -362,8 +423,14 @@ class RegulatoryNetwork:
 
     def duplicateNodeGroup(self, nodeRange=None, newIndex=None, meanLength=3):
         '''
-        nodeRange is a tuple with the index of two nodes. Those nodes and
-        all the noded between them will be duplicated
+        Duplicates a range of nodes from nodeRange[0] through nodeRange[1]
+        and inserts them starting at newIndex.
+
+        If nodeRange is not provided, then a random range with a mean length
+        of meanLength will be chosen
+
+        If newIndex is not provided, then the duplicated range will be inserted
+        either directly ahead or directly behind nodeRange
         '''
         # choose two random nodes. The set between these nodes will be
         # duplicated, including them. edges between nodes in the group
@@ -382,7 +449,9 @@ class RegulatoryNetwork:
 
         if newIndex is None:
             # can be any index in self.n, including self.n (after everything)
-            newIndex = random.randrange(self.n + 1)
+            # newIndex = random.randrange(self.n + 1)
+            # set the newIndex to be adjacent to nodeRange
+            newIndex = random.choice([nodeRange[0], nodeRange[1] + 1])
 
         copyRange = (newIndex, newIndex + nodeRange[1] - nodeRange[0])
 
@@ -403,12 +472,40 @@ class RegulatoryNetwork:
         originalOldNodes = list(range(nodeRange[0], nodeRange[1] + 1))
         newNodes = list(range(copyRange[0], copyRange[1] + 1))
 
+        # calculate extent of node group to allow offset
+        # measure distance between all nodes in group
+        # store largest distance, as a vector
+        maxDist = self.node_r * 2
+        maxDistVec = v.mul(v.u(random.vonmisesvariate(0, 0)), maxDist)
+        for node1 in originalOldNodes:
+            for node2 in originalOldNodes:
+                vec = v.sub(self.locs[node1], self.locs[node2])
+                dist = v.mag(vec)
+                if dist > maxDist:
+                    maxDist = dist
+                    maxDistVec = vec
+        # offset all the nodes in the new group by an amount perpendicular to
+        # distvec
+        offset = v.perp(v.mul(maxDistVec, 0.5))
+        hueOffset = random.vonmisesvariate(0, 8) * 360 / 2 / math.pi
+
         # now create the copies. the results after should be in the positions
         # specified by oldNodes and newNodes
         oldNodeIndex = nodeRange[0]
         newNodeIndex = copyRange[0]
         for i in range(copyLength):
-            self.addGene(copy=oldNodeIndex, newIndex=newNodeIndex)
+            # generate a color offset from the corrisponding old node
+            newColor = pygame.Color(self.colors[oldNodeIndex])
+            newHue = (newColor.hsva[0] + hueOffset) % 360
+            newColor.hsva = (newHue,
+                             newColor.hsva[1],
+                             newColor.hsva[2],
+                             newColor.hsva[3])
+            self.addGene(loc=v.sum(self.locs[oldNodeIndex],
+                                   offset),
+                         color=newColor,
+                         copy=oldNodeIndex,
+                         newIndex=newNodeIndex)
             oldNodeIndex += 1
             newNodeIndex += 1
             if oldNodeIndex == copyRange[0]:
