@@ -733,6 +733,27 @@ class RegulatoryNetwork:
 
         self.setWeight(i, j, 0)
 
+    def scaleWeight(self, i=None, j=None, scaler=None):
+
+        if len(self.edgeList) == 0:
+            # no edges, exit
+            return
+        if i is not None or j is not None:
+            if i is None:
+                i = self.randomNode()
+            if j is None:
+                j = self.randomNode()
+
+        else:
+            edge = self.randomEdge()
+            i = edge[0][0]
+            j = edge[0][1]
+
+        if scaler is None:
+            scaler = random.gammavariate(4, 1 / 4)
+
+        self.setWeight(i, j, self.getWeight(i, j) * scaler)
+
     def randomNode(self):
         '''
         returns the index of a random valid node.

@@ -1153,7 +1153,7 @@ def geneNetworkEventHandler(event, geneNetwork):
                         # Zap!
                         # choose a random mutation to apply to the network.
                         mutationIndex = random.randrange(9)
-                        mutationIndex = 10
+                        mutationIndex = 11
                         match mutationIndex:
                             case 0:
                                 print("addGene")
@@ -1188,6 +1188,9 @@ def geneNetworkEventHandler(event, geneNetwork):
                             case 10:
                                 print("removeEdge")
                                 geneNetwork.net.removeEdge()
+                            case 11:
+                                print("scaleWeight")
+                                geneNetwork.net.scaleWeight()
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:
