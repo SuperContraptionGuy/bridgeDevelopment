@@ -1152,33 +1152,42 @@ def geneNetworkEventHandler(event, geneNetwork):
                     case pygame.K_z:
                         # Zap!
                         # choose a random mutation to apply to the network.
-                        mutationIndex = random.randrange(7)
-                        mutationIndex = 2
+                        mutationIndex = random.randrange(9)
+                        mutationIndex = 10
                         match mutationIndex:
                             case 0:
-                                print("splitEdge")
-                                geneNetwork.net.splitEdge()
+                                print("addGene")
+                                geneNetwork.net.addGene()
                             case 1:
-                                print("duplicateNode")
-                                geneNetwork.net.duplicateNode()
-                            case 2:
-                                print("duplicateNodeGroup")
-                                geneNetwork.net.duplicateNodeGroup()
-                            case 3:
-                                print("changeNodeIndex")
-                                geneNetwork.net.changeNodeIndex()
-                            case 4:
-                                print("changeNodeGroupIndex")
-                                geneNetwork.net.changeNodeGroupIndex()
-                            case 5:
-                                print("flipEdge")
-                                geneNetwork.net.flipEdge()
-                            case 6:
                                 print("removeGene")
                                 geneNetwork.net.removeGene()
-                            case 7:
+                            case 2:
                                 print("removeGeneGroup")
                                 geneNetwork.net.removeGeneGroup()
+                            case 3:
+                                print("splitEdge")
+                                geneNetwork.net.splitEdge()
+                            case 4:
+                                print("flipEdge")
+                                geneNetwork.net.flipEdge()
+                            case 5:
+                                print("duplicateNode")
+                                geneNetwork.net.duplicateNode()
+                            case 6:
+                                print("duplicateNodeGroup")
+                                geneNetwork.net.duplicateNodeGroup()
+                            case 7:
+                                print("changeNodeIndex")
+                                geneNetwork.net.changeNodeIndex()
+                            case 8:
+                                print("changeNodeGroupIndex")
+                                geneNetwork.net.changeNodeGroupIndex()
+                            case 9:
+                                print("addEdge")
+                                geneNetwork.net.addEdge()
+                            case 10:
+                                print("removeEdge")
+                                geneNetwork.net.removeEdge()
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:
@@ -1558,52 +1567,6 @@ class GeneNetwork:
     # scale parameter (k1, b, k2)
     # negate bias
     # merge nodes, combine their edges and parameters
-
-    def changeNodeIndex(self, oldIndex=None, newIndex=None):
-        '''
-        change the index of node at oldIndex to newIndex.
-        newIndex max value is self.n - 1
-        '''
-        if self.n == 0:
-            # skip if no nodes
-            return
-        if oldIndex is None:
-            oldIndex = random.randrange(self.n)
-        if newIndex is None:
-            newIndex = random.randrange(self.n)
-
-        # # make copy of params
-        # self.addGene(copy=oldIndex, newIndex=newIndex)
-        # # modify network
-        # self.net.changeNodeIndex(oldIndex, newIndex)
-
-        if newIndex > oldIndex:
-            # the new node will be offset when the old node is deleted, so
-            # compensate for it
-            newIndex += 1
-            # because of this, newIndex maximum is self.n - 1
-
-        # duplicate node, then remove original
-        newNode = self.addGene(copy=oldIndex, newIndex=newIndex)
-        if newIndex <= oldIndex:
-            # old index is offset by the new
-            oldIndex += 1
-        # copy the edges etc.
-        self.duplicateNode(oldIndex, newNode)
-
-        # remove old gene
-        self.removeGene(oldIndex)
-
-    def changeNodeGroupIndex(self, nodeRange=None, newIndex=None):
-        # Move a group of node represented by nodeRange to a new index position
-        # new index has a range from 0 to self.n - (nodeRange[1] - nodeRange[0]
-
-        if nodeRange is None:
-            pass
-        if newIndex is None:
-            pass
-
-        pass
 
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,

@@ -99,17 +99,25 @@ class RegulatoryNetwork:
                 newIndex=None):
         '''
         adds a node to the neural network (a gene/morphogen)
-        all parameters are numbers, except w, which is a vector of length n
+
+        if copy is provided, the parameters are copied from that node, but
+        over ridden if also explicitly provided in the arguments.
+
+        add a new gene and associated interface properties.
+        loc is the coordinate position of the node in the editor
+            if not provided, a random loc is chosen around the origin
+
+        if newIndex is provided, then that will the the index of the new
+        node. newIndex must be from 0 through self.n.
+        Otherwise it's inserted randomly
+
+        To add weights, w is a vector of length n
         (including the newly added node) which represents how the new node
         is affected by all other concentrations, and w2, which is a vector of
         length n-1 (not including the new node) which represents how every
         other node is affected by the new one. The last value in w represents
         the weight the new substance has on itself.
 
-        add a new gene and associated interface properties.
-        loc is the coordinate position of the node in the editor
-        nodeExists set it to true if the node already exists in self.net,
-            assuming that self.n is the correct index in self.net lists
         '''
 
         if newIndex is None:
@@ -136,7 +144,11 @@ class RegulatoryNetwork:
             self.k1.insert(newIndex, random.expovariate(1))
             self.b.insert(newIndex, random.gauss(0, 1))
             self.k2.insert(newIndex, random.expovariate(1))
-            self.locs.insert(newIndex, (0, 0))
+            # self.locs.insert(newIndex, (0, 0))
+            # use a random location
+            self.locs.insert(newIndex,
+                             v.mul(v.u(random.uniform(0, math.pi * 2)),
+                                   random.gauss(0, 200)))
             # choose random color for the new gene
             color = pygame.Color((0, 0, 0))
             color.hsva = (random.uniform(0, 360), 80, 50)
@@ -231,6 +243,12 @@ class RegulatoryNetwork:
         self.n -= 1
 
     def removeGeneGroup(self, nodeRange=None):
+        '''
+        Removes a random range of genes or that given by nodeRange
+        which is an inclusive tuple
+        (start, last)
+        Edge list is recalculated
+        '''
         if nodeRange is None:
             nodeRange = self.randomNodeRange()
 
@@ -244,23 +262,47 @@ class RegulatoryNetwork:
     # TODO: modify these functions so the index of the new nodes is related to
     #   the derivitive nodes
     # now, some more organic network modification functions
+
+    # add random gene
+    # delete node
+    # delete group of nodes (range of indexes)
     # split edge    create new node in place of an edge (insertNode)
     # flip edge
     # duplicate node
     # duplicated group of nodes (range of indexes)
     # change node index (regrouping/separating functional groups)
     # change group of nodes index (transposable elements)
-    # move node along a connected edge ???
-    # move group of nodes along a connected edge ???
-    # delete node
-    # delete group of nodes (range of indexes)
     # create random edge
     # delete random existing edge
-    # redirect existing edge to random node
-    # scale edge weight
+    # scale existing edge weight
     # negate weight
+    # redirect existing edge to random node
     # scale parameter (k1, b, k2)
     # negate bias
+
+    # move node along a connected edge ???
+    # move group of nodes along a connected edge ???
+
+    # there are complemetary mutations that keep the number of nodes, and some
+    #   without complements
+    # and edges on a random walk
+    # addGene - deleteGene
+    # split edge - deleteGene
+    # flip edge
+    # duplicate node - delete node
+    # duplicate group - delete group
+    # change index
+    # change group index
+    # create random edge - delete random edge (roughly even. delete advantage)
+    # scale existing edge weight
+    # negate weight
+    # redirect existing edge
+    # scale parameters
+    # negate bias
+
+    # maybe adjust the random node and randomrange functions to allow
+    #   weighted distrubutions around a point. The parameters for these
+    #   distributions could be stored per gene.
 
     def splitEdge(self, edge=None, node=None, newIndex=None):
         '''
@@ -475,6 +517,7 @@ class RegulatoryNetwork:
         # calculate extent of node group to allow offset
         # measure distance between all nodes in group
         # store largest distance, as a vector
+        # I don't like this distance calculator sometimes it gets big
         maxDist = self.node_r * 2
         maxDistVec = v.mul(v.u(random.vonmisesvariate(0, 0)), maxDist)
         for node1 in originalOldNodes:
@@ -561,13 +604,18 @@ class RegulatoryNetwork:
         return (originalOldNodes, oldNodes, newNodes)
 
     def changeNodeIndex(self, oldIndex=None, newIndex=None):
-        ''' Move a node. Returns an updated position of the newIndex'''
+        '''
+        Move a node. Returns an updated position of the newIndex
+
+        Change the index of node at oldIndex to newIndex.
+        newIndex max value is self.n - 1
+        '''
         if self.n == 0:
             return
         if oldIndex is None:
             oldIndex = self.randomNode()
         if newIndex is None:
-            newIndex = self.randomeNode()
+            newIndex = self.randomNode()
 
         if newIndex > oldIndex:
             # if the new index will be offset when we delete the old node,
@@ -597,7 +645,9 @@ class RegulatoryNetwork:
     def changeNodeGroupIndex(self, nodeRange=None, newIndex=None):
         '''
         changes index of nodes in nodeRange to start from newIndex.
-        newIndex must be between 0 and self.n - (nodeRange[1] - nodeRange[0]+1)
+
+        Move a group of node represented by nodeRange to a new index position
+        newIndex has a range from 0 to self.n - (nodeRange[1] - nodeRange[0]
         '''
 
         if nodeRange is None:
@@ -605,8 +655,8 @@ class RegulatoryNetwork:
             nodeRange = self.randomNodeRange()
         if newIndex is None:
             # choose a random index, not including the nodeRange
-            newIndex = random.randrange(self.n -
-                                        (nodeRange[1] - nodeRange[0] + 1))
+            copyLength = nodeRange[1] - nodeRange[0] + 1
+            newIndex = random.randrange(self.n - copyLength + 1)
         if newIndex > nodeRange[0]:
             # new index should be offset past nodeRange, so that when nodeRange
             # is deleted, the index of  the duplicated range starts at the
@@ -627,7 +677,66 @@ class RegulatoryNetwork:
                 # of the old range, so skip to the end of the range
                 oldNodeIndex += copyLength
 
+    def addEdge(self, i=None, j=None, weight=None):
+        '''
+        add a random edge to the graph with random weight.
+
+        Does not override existing edges
+
+        If provided, i, j, and weight define parameters of the new edge.
+        The new edge points from j to i with weight weight.
+
+        if any parameter is not provided, it is randomized
+        '''
+        # if not provided, randomize properites of the new edge
+        if self.n < 1:
+            # no nodes, exit
+            return
+        if i is None:
+            i = self.randomNode()
+        if j is None:
+            j = self.randomNode()
+        if weight is None:
+            weight = random.gauss(0, 1)
+
+        if (i, j) in self.edgeList:
+            # this edge already exists
+            return
+
+        self.setWeight(i, j, weight)
+
+    def removeEdge(self, i=None, j=None):
+        '''
+        remove a random existing edge
+
+        If provided, i and j define parameters of the new edge.
+        The new edge points from j to i.
+
+        if any parameter is not provided, it is randomized
+
+        if neither i or j are provided, then a random existing edge is deleted
+        '''
+        # if not provided, randomize properites of the new edge
+        if len(self.edgeList) == 0:
+            # no edges, exit
+            return
+        if i is not None or j is not None:
+            if i is None:
+                i = self.randomNode()
+            if j is None:
+                j = self.randomNode()
+
+        else:
+            edge = self.randomEdge()
+            i = edge[0][0]
+            j = edge[0][1]
+
+        self.setWeight(i, j, 0)
+
     def randomNode(self):
+        '''
+        returns the index of a random valid node.
+        '''
         if self.n == 0:
             return None
             # random.randrange(
@@ -635,6 +744,13 @@ class RegulatoryNetwork:
         return ret
 
     def randomNodeRange(self, meanLength=3):
+        '''
+        returns a tuple representing a range of valid nodes
+        (start, end) inclusive
+
+        The average length of the range returned is meanLength void edge
+        effects
+        '''
         # choose random range, with a mean length
         r1 = self.randomNode()
         length = int(random.gauss(0, meanLength))
@@ -656,6 +772,15 @@ class RegulatoryNetwork:
         return nodeRange
 
     def randomEdge(self):
+        '''
+        returns a random valid edge, in the tuple format
+
+            (parents, weight)
+
+        where parents is a tuple
+
+            (parent1, parent2)
+        '''
         # choose random edge
         edges = list(self.edgeList.items())
         if len(edges) == 0:
@@ -675,6 +800,12 @@ class RegulatoryNetwork:
         return 1 / (1 + math.exp(-x))
 
     def calculate_dz(self, z):
+        '''
+        calculates the change in concentration for every gene product given
+        the current concentration of those products, z.
+
+        z is a list, length must be exactly self.n
+        '''
         if self.n != len(z):
             print("NOT EQUAL: ", self.n, len(z))
         # calculate the rate of change of each morphogen
