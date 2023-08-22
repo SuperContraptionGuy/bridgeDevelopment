@@ -1,6 +1,8 @@
 import math
 import random
 import sys
+import pygame.color
+import vecUtils as v
 
 import pprint
 
@@ -24,14 +26,9 @@ class RegulatoryNetwork:
     '''
     # max value for x in expression e^x
     EXP_MAX = math.floor(math.log(sys.float_info.max))
+    node_r = 20
 
-    def __init__(self,
-                 n,
-                 k1=None,
-                 edgeList=None,
-                 b=None,
-                 k2=None
-                 ):
+    def __init__(self):
         '''
         var  description                size
         z   concentrations matrix @t    n
@@ -41,23 +38,18 @@ class RegulatoryNetwork:
         k2  degradation rate            n
         '''
         # initalize internal neural network parameters
-        self.n = n
-        if k1 is None:
-            self.k1 = [1 for x in range(n)]
-        else:
-            self.k1 = k1
-        if edgeList is None:
-            self.edgeList = {}
-        else:
-            self.edgeList = edgeList
-        if b is None:
-            self.b = [1 for x in range(n)]
-        else:
-            self.b = b
-        if k2 is None:
-            self.k2 = [1 for x in range(n)]
-        else:
-            self.k2 = k2
+        self.n = 0
+
+        self.z = []
+        self.k1 = []
+        self.k2 = []
+        self.b = []
+
+        self.edgeList = {}
+
+        self.locs = []
+        self.colors = []
+        self.displayIndicators = []
 
     def setWeight(self, i, j, wij):
         # set the weight with parents j, i
@@ -96,6 +88,8 @@ class RegulatoryNetwork:
             return 0
 
     def addGene(self,
+                loc=None,
+                color=None,
                 k1=None,
                 w=None,
                 w2=None,
@@ -111,34 +105,23 @@ class RegulatoryNetwork:
         length n-1 (not including the new node) which represents how every
         other node is affected by the new one. The last value in w represents
         the weight the new substance has on itself.
+
+        add a new gene and associated interface properties.
+        loc is the coordinate position of the node in the editor
+        nodeExists set it to true if the node already exists in self.net,
+            assuming that self.n is the correct index in self.net lists
         '''
 
-        if newIndex is not None:
-            # with a newIndex that is not self.n the edge list will be outdated
-            # offset any index in the edge list if it is equal to or greater
-            # than newIndex
-            newEdgeList = {}
-            for (parents, weight) in self.edgeList.items():
-                newParents = parents
-                if parents[0] >= newIndex and parents[1] >= newIndex:
-                    # both parents are larger than new index
-                    newParents = (parents[0] + 1, parents[1] + 1)
-                elif parents[0] >= newIndex:
-                    # first parent is larger
-                    newParents = (parents[0] + 1, parents[1])
-                elif parents[1] >= newIndex:
-                    # second parent is larger
-                    newParents = (parents[0], parents[1] + 1)
-                # add edge
-                newEdgeList[newParents] = weight
-            # update the edge list
-            self.edgeList = newEdgeList
-
-        else:
-            # otherwise, append the new node to the end. edges are preserved
-            newIndex = self.n
+        if newIndex is None:
+            # put the node somewhere randomly
+            # newIndex = random.randrange(self.n + 1)
+            # put it at the end
+            # newIndex = self.n
+            newIndex = random.randrange(self.n + 1)
 
         self.n += 1
+        self.z.insert(newIndex, random.expovariate(1))
+        self.displayIndicators.insert(newIndex, False)
 
         if copy is None:
             if k1 is not None:
@@ -153,11 +136,42 @@ class RegulatoryNetwork:
                 self.k2.insert(newIndex, k2)
             else:
                 self.k2.insert(newIndex, random.expovariate(1))
+            if loc is not None:
+                self.locs.insert(newIndex, loc)
+            else:
+                self.locs.insert(newIndex, (0, 0))
+            if color is not None:
+                self.colors.insert(newIndex, color)
+            else:
+                # choose random color for the new gene
+                color = pygame.Color((0, 0, 0))
+                color.hsva = (random.uniform(0, 360), 80, 50)
+                self.colors.insert(newIndex, color)
         else:
             # copy parameters from copy, but not edges
             self.k1.insert(newIndex, self.k1[copy])
             self.b.insert(newIndex, self.b[copy])
             self.k2.insert(newIndex, self.k2[copy])
+            self.locs.insert(newIndex, self.locs[copy])
+            self.colors.insert(newIndex, pygame.Color(self.colors[copy]))
+
+        # rekey edge list
+        newEdgeList = {}
+        for (parents, weight) in self.edgeList.items():
+            newParents = parents
+            if parents[0] >= newIndex and parents[1] >= newIndex:
+                # both parents are now larger than new index
+                newParents = (parents[0] + 1, parents[1] + 1)
+            elif parents[0] >= newIndex:
+                # first parent is larger
+                newParents = (parents[0] + 1, parents[1])
+            elif parents[1] >= newIndex:
+                # second parent is larger
+                newParents = (parents[0], parents[1] + 1)
+            # add edge
+            newEdgeList[newParents] = weight
+        # update the edge list
+        self.edgeList = newEdgeList
 
         # then modify w and weightList using setWeight() and the new data if
         # there is any
@@ -172,13 +186,21 @@ class RegulatoryNetwork:
         # return index of new node
         return newIndex
 
-    def removeGene(self, i):
+    def removeGene(self, i=None):
         '''Remove gene i'''
         if self.n > 0:
+            if i is None:
+                i = self.randomNode()
+                if i is None:
+                    return
 
             self.k1.pop(i)
             self.b.pop(i)
             self.k2.pop(i)
+            self.z.pop(i)
+            self.locs.pop(i)
+            self.colors.pop(i)
+            self.displayIndicators.pop(i)
 
             # entire edge list must be re-keyed since all indexes changed.
             # edges that involve the node being deleted must also be deleted
@@ -205,6 +227,17 @@ class RegulatoryNetwork:
 
             self.n -= 1
 
+    def removeGeneGroup(self, nodeRange=None):
+        if nodeRange is None:
+            nodeRange = self.randomNodeRange()
+
+        index = nodeRange[0]
+        for node in range(nodeRange[0], nodeRange[1] + 1):
+            # the lazy way. more efficient way would be to only recalculate
+            # edges after all genes are deleted. right now recalculation
+            # is bundled with removeGene, so is ran every time
+            self.removeGene(index)
+
     # TODO: modify these functions so the index of the new nodes is related to
     #   the derivitive nodes
     # now, some more organic network modification functions
@@ -226,7 +259,7 @@ class RegulatoryNetwork:
     # scale parameter (k1, b, k2)
     # negate bias
 
-    def insertNode(self, edge=None, node=None):
+    def splitEdge(self, edge=None, node=None, newIndex=None):
         '''
         edge is a tuple (i, j) of parent indexes
         node is the index of the node to insert into the edge
@@ -237,14 +270,48 @@ class RegulatoryNetwork:
             edge = self.randomEdge()
             if edge is None:
                 return
+        if newIndex is None:
+            # select an index between the parent nodes of the edge
+            newIndex = int(math.ceil((edge[0][0] + edge[0][1]) / 2))
         if node is None:
-            # create a new random node to insert
-            node = self.addGene()
+            # create a new random node to insert, put it at the end, move
+            # later
+            node = self.addGene(newIndex=self.n)
 
         # displace current edge with two new edges connected to node
         self.setWeight(edge[0][0], node, edge[1])
         self.setWeight(node, edge[0][1], edge[1])
         self.setWeight(edge[0][0], edge[0][1], 0)
+
+        if edge[0][0] == edge[0][1]:
+            # this is a loopback edge, offset the new node
+            newNodePos = v.sum(self.locs[edge[0][0]],
+                               v.mul(v.u(random.uniform(0, math.pi * 2)),
+                                     self.node_r * 3))
+        else:
+            # this is a standard edge, make position average of parents
+            newNodePos = v.div(v.sum(self.locs[edge[0][0]],
+                                     self.locs[edge[0][1]]), 2)
+        # mix the colors of the two parent nodes
+        hue1 = self.colors[edge[0][0]].hsva[0]
+        hue2 = self.colors[edge[0][1]].hsva[0]
+        newColor = pygame.Color(self.colors[edge[0][0]])
+        # take the average hue, making sure to use the shortest circular
+        # distance between the two hues
+        if abs(hue2 - hue1) <= 180:
+            newHue = (hue1 + hue2) / 2
+        else:
+            newHue = ((hue1 + hue2) / 2 + 180) % 360
+        newColor.hsva = (newHue,
+                         newColor.hsva[1],
+                         newColor.hsva[2],
+                         newColor.hsva[3])
+
+        self.locs[node] = newNodePos
+        self.colors[node] = newColor
+        # change node index to new index
+        if newIndex != node:
+            self.changeNodeIndex(node, newIndex)
 
     def flipEdge(self, edge=None):
         if edge is None:
