@@ -1152,67 +1152,7 @@ def geneNetworkEventHandler(event, geneNetwork):
                     case pygame.K_z:
                         # Zap!
                         # choose a random mutation to apply to the network.
-                        mutationIndex = random.randrange(9)
-                        mutationIndex = 13
-                        match mutationIndex:
-                            case 0:
-                                print("addGene")
-                                geneNetwork.net.addGene()
-                            case 1:
-                                print("removeGene")
-                                geneNetwork.net.removeGene()
-                            case 2:
-                                print("removeGeneGroup")
-                                geneNetwork.net.removeGeneGroup()
-                            case 3:
-                                print("splitEdge")
-                                geneNetwork.net.splitEdge()
-                            case 4:
-                                print("flipEdge")
-                                geneNetwork.net.flipEdge()
-                            case 5:
-                                print("duplicateNode")
-                                geneNetwork.net.duplicateNode()
-                            case 6:
-                                print("duplicateNodeGroup")
-                                geneNetwork.net.duplicateNodeGroup()
-                            case 7:
-                                print("changeNodeIndex")
-                                geneNetwork.net.changeNodeIndex()
-                            case 8:
-                                print("changeNodeGroupIndex")
-                                geneNetwork.net.changeNodeGroupIndex()
-                            case 9:
-                                print("addEdge")
-                                geneNetwork.net.addEdge()
-                            case 10:
-                                print("removeEdge")
-                                geneNetwork.net.removeEdge()
-                            case 11:
-                                print("scaleWeight")
-                                geneNetwork.net.scaleWeight()
-                            case 12:
-                                print("negateWeight")
-                                geneNetwork.net.negateWeight()
-                            case 13:
-                                print("redirectEdge")
-                                geneNetwork.net.redirectEdge()
-    # there are complemetary mutations that keep the number of nodes, and some
-    #   without complements
-    # and edges on a random walk
-    # addGene - deleteGene
-    # split edge - deleteGene
-    # flip edge
-    # duplicate node - delete node
-    # duplicate group - delete group
-    # change index
-    # change group index
-    # create random edge - delete random edge (roughly even. delete advantage)
-    # scale existing edge weight
-    # negate weight
-    # redirect existing edge (slightly uneven, sometimes deletes edges)
-    # scale parameters
-    # negate bias
+                        geneNetwork.net.mutate()
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:
@@ -2498,6 +2438,8 @@ while running:
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         geneNetwork.update(dt)
+        if debug:
+            geneNetwork.net.mutate()
 
     # Render to the screen
 

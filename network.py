@@ -249,6 +249,9 @@ class RegulatoryNetwork:
         (start, last)
         Edge list is recalculated
         '''
+        if self.n < 1:
+            return
+
         if nodeRange is None:
             nodeRange = self.randomNodeRange()
 
@@ -296,7 +299,7 @@ class RegulatoryNetwork:
     # create random edge - delete random edge (roughly even. delete advantage)
     # scale existing edge weight
     # negate weight
-    # redirect existing edge
+    # redirect existing edge (slightly uneven, sometimes deletes edges)
     # scale parameters
     # negate bias
 
@@ -649,6 +652,8 @@ class RegulatoryNetwork:
         Move a group of node represented by nodeRange to a new index position
         newIndex has a range from 0 to self.n - (nodeRange[1] - nodeRange[0]
         '''
+        if self.n < 1:
+            return
 
         if nodeRange is None:
             # choose random range
@@ -828,6 +833,193 @@ class RegulatoryNetwork:
         self.setWeight(i, j, 0)
         self.setWeight(newi, newj, weight)
 
+    def scaleParameter(self, node=None, k1=None, k2=None, b=None):
+        '''
+        scales a parameter of node.
+
+        If no parameters after node are given, one parameter is randomly chosen
+        and scaled a random amount. (scale factor always positive, mean of 1)
+
+        if no node given, a random node is chosen
+
+        if given, takes k1, k2, and/or b as scaling factors to adjust the
+        existing weights of node.
+        '''
+        if self.n < 1:
+            return
+
+        if node is None:
+            node = self.randomNode()
+        if k1 is not None or k2 is not None or b is not None:
+            if k1 is None:
+                k1 = random.gammavariate(4, 1 / 4)
+            if k2 is None:
+                k2 = random.gammavariate(4, 1 / 4)
+            if b is None:
+                b = random.gammavariate(4, 1 / 4)
+        else:
+            k1 = 1
+            k2 = 1
+            b = 1
+            # pick a random parameter to tweak
+            match random.randrange(3):
+                case 0:
+                    k1 = random.gammavariate(4, 1 / 4)
+                case 1:
+                    k2 = random.gammavariate(4, 1 / 4)
+                case 2:
+                    b = random.gammavariate(4, 1 / 4)
+
+        self.k1[node] = self.k1[node] * k1
+        self.k2[node] = self.k2[node] * k2
+        self.b[node] = self.b[node] * b
+
+    def negateBias(self, node=None):
+        '''
+        Negates the bias value. if node is not specified, negates a random
+        node's bias
+        '''
+        if self.n < 1:
+            return
+
+        if node is None:
+            node = self.randomNode()
+
+        self.b[node] = self.b[node] * -1
+
+    def mutate(self):
+        '''
+        applies a random mutation to the regulatory network.
+        Hopefully these mutations are somewhat balances, so that on average
+        the number of nodes and edges follow a random walk.
+        '''
+
+        # there are complemetary mutations that keep the number of nodes, and some
+        #   without complements
+        #   and edges on a random walk
+        # addGene - deleteGene
+        # split edge - deleteGene
+        # flip edge
+        # duplicate node - delete node
+        # duplicate group - delete group
+        # change index
+        # change group index
+        # create random edge - delete random edge (roughly even. delete advantage)
+        # scale existing edge weight
+        # negate weight
+        # redirect existing edge (slightly uneven, sometimes deletes edges)
+        # scale parameters
+        # negate bias
+        mutationGroup = random.randrange(13)
+        choice = random.choice([True, False])
+        match mutationGroup:
+            case 0:
+                # addGene - deleteGene
+                if choice:
+                    mutationIndex = 0
+                else:
+                    mutationIndex = 1
+            case 1:
+                # split edge - deleteGene
+                if choice:
+                    mutationIndex = 3
+                else:
+                    mutationIndex = 1
+            case 2:
+                # flip edge
+                mutationIndex = 4
+            case 3:
+                # duplicate node - delete node
+                if choice:
+                    mutationIndex = 5
+                else:
+                    mutationIndex = 1
+            case 4:
+                # duplicate group - delete group
+                if choice:
+                    mutationIndex = 6
+                else:
+                    mutationIndex = 2
+            case 5:
+                # change index
+                mutationIndex = 7
+            case 6:
+                # change group index
+                mutationIndex = 8
+            case 7:
+                # create random edge - delete random edge (roughly even. delete advantage)
+                if choice:
+                    mutationIndex = 9
+                else:
+                    mutationIndex = 10
+            case 8:
+                # scale existing edge weight
+                mutationIndex = 11
+            case 9:
+                # negate weight
+                mutationIndex = 12
+            case 10:
+                # redirect existing edge (slightly uneven, sometimes deletes edges)
+                mutationIndex = 13
+            case 11:
+                # scale parameters
+                mutationIndex = 14
+            case 12:
+                # negate bias
+                mutationIndex = 15
+
+        # mutationIndex = 15
+        match mutationIndex:
+            case 0:
+                print("addGene")
+                self.addGene()
+            case 1:
+                print("removeGene")
+                self.removeGene()
+            case 2:
+                print("removeGeneGroup")
+                self.removeGeneGroup()
+            case 3:
+                print("splitEdge")
+                self.splitEdge()
+            case 4:
+                print("flipEdge")
+                self.flipEdge()
+            case 5:
+                print("duplicateNode")
+                self.duplicateNode()
+            case 6:
+                print("duplicateNodeGroup")
+                self.duplicateNodeGroup()
+            case 7:
+                print("changeNodeIndex")
+                self.changeNodeIndex()
+            case 8:
+                print("changeNodeGroupIndex")
+                self.changeNodeGroupIndex()
+            case 9:
+                print("addEdge")
+                self.addEdge()
+            case 10:
+                print("removeEdge")
+                self.removeEdge()
+            case 11:
+                print("scaleWeight")
+                self.scaleWeight()
+            case 12:
+                print("negateWeight")
+                self.negateWeight()
+            case 13:
+                print("redirectEdge")
+                self.redirectEdge()
+            case 14:
+                print("scaleParameter")
+                self.scaleParameter()
+            case 15:
+                print("negateBias")
+                self.negateBias()
+
+
     def randomNode(self):
         '''
         returns the index of a random valid node.
@@ -846,6 +1038,8 @@ class RegulatoryNetwork:
         The average length of the range returned is meanLength void edge
         effects
         '''
+        if self.n < 1:
+            return None
         # choose random range, with a mean length
         r1 = self.randomNode()
         length = int(random.gauss(0, meanLength))
