@@ -1153,7 +1153,7 @@ def geneNetworkEventHandler(event, geneNetwork):
                         # Zap!
                         # choose a random mutation to apply to the network.
                         mutationIndex = random.randrange(9)
-                        mutationIndex = 11
+                        mutationIndex = 13
                         match mutationIndex:
                             case 0:
                                 print("addGene")
@@ -1191,6 +1191,28 @@ def geneNetworkEventHandler(event, geneNetwork):
                             case 11:
                                 print("scaleWeight")
                                 geneNetwork.net.scaleWeight()
+                            case 12:
+                                print("negateWeight")
+                                geneNetwork.net.negateWeight()
+                            case 13:
+                                print("redirectEdge")
+                                geneNetwork.net.redirectEdge()
+    # there are complemetary mutations that keep the number of nodes, and some
+    #   without complements
+    # and edges on a random walk
+    # addGene - deleteGene
+    # split edge - deleteGene
+    # flip edge
+    # duplicate node - delete node
+    # duplicate group - delete group
+    # change index
+    # change group index
+    # create random edge - delete random edge (roughly even. delete advantage)
+    # scale existing edge weight
+    # negate weight
+    # redirect existing edge (slightly uneven, sometimes deletes edges)
+    # scale parameters
+    # negate bias
 
             case GNIstate.NEWEDGEFINISHED:
                 match event.key:

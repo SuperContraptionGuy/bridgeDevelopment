@@ -734,7 +734,14 @@ class RegulatoryNetwork:
         self.setWeight(i, j, 0)
 
     def scaleWeight(self, i=None, j=None, scaler=None):
+        '''
+        Scales a weight by a constant factor.
 
+        If no weight is specified, it scales a random weight.
+
+        if no scaler is specified, it chooses a random scaling factor,
+        always positive and mean of 1
+        '''
         if len(self.edgeList) == 0:
             # no edges, exit
             return
@@ -753,6 +760,73 @@ class RegulatoryNetwork:
             scaler = random.gammavariate(4, 1 / 4)
 
         self.setWeight(i, j, self.getWeight(i, j) * scaler)
+
+    def negateWeight(self, i=None, j=None):
+        '''
+        Negates a weight. if none specified, negates a random weight
+        '''
+        if len(self.edgeList) == 0:
+            # no edges, exit
+            return
+        if i is not None or j is not None:
+            if i is None:
+                i = self.randomNode()
+            if j is None:
+                j = self.randomNode()
+
+        else:
+            edge = self.randomEdge()
+            i = edge[0][0]
+            j = edge[0][1]
+
+        self.setWeight(i, j, self.getWeight(i, j) * -1)
+
+    def redirectEdge(self, i=None, j=None, newi=None, newj=None):
+        '''
+        Redirects an edge from (i, j) to (newi, newj).
+
+        if any parameters are missing, they are randomized.
+
+        if no parameters are supplied, one of the two starting parents
+        will be perserved
+        '''
+        if len(self.edgeList) == 0:
+            # no edges, exit
+            return
+        if i is not None or j is not None:
+            if i is None:
+                i = self.randomNode()
+            if j is None:
+                j = self.randomNode()
+
+            weight = self.getWeight(i, j)
+
+        else:
+            # pick a random edge
+            edge = self.randomEdge()
+            i = edge[0][0]
+            j = edge[0][1]
+            weight = edge[1]
+
+        if newi is not None or newj is not None:
+            if newi is None:
+                newi = self.randomNode()
+            if newj is None:
+                newj = self.randomNode()
+
+        else:
+            # choose whether to redirect the tip or tail
+            if random.choice([True, False]):
+                # tip
+                newi = self.randomNode()
+                newj = j
+            else:
+                # tail
+                newi = i
+                newj = self.randomNode()
+
+        self.setWeight(i, j, 0)
+        self.setWeight(newi, newj, weight)
 
     def randomNode(self):
         '''
