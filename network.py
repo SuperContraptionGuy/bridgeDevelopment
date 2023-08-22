@@ -398,6 +398,8 @@ class RegulatoryNetwork:
 
     def changeNodeIndex(self, oldIndex=None, newIndex=None):
         ''' Move a node. Returns an updated position of the newIndex'''
+        if self.n == 0:
+            return
         if oldIndex is None:
             oldIndex = self.randomNode()
         if newIndex is None:
@@ -434,6 +436,13 @@ class RegulatoryNetwork:
         newIndex must be between 0 and self.n - (nodeRange[1] - nodeRange[0]+1)
         '''
 
+        if nodeRange is None:
+            # choose random range
+            nodeRange = self.randomNodeRange()
+        if newIndex is None:
+            # choose a random index, not including the nodeRange
+            newIndex = random.randrange(self.n -
+                                        (nodeRange[1] - nodeRange[0] + 1))
         if newIndex > nodeRange[0]:
             # new index should be offset past nodeRange, so that when nodeRange
             # is deleted, the index of  the duplicated range starts at the

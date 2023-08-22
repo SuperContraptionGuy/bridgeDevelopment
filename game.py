@@ -1234,7 +1234,8 @@ def geneNetworkEventHandler(event, geneNetwork):
                     case pygame.K_z:
                         # Zap!
                         # choose a random mutation to apply to the network.
-                        mutationIndex = random.randrange(5)
+                        mutationIndex = random.randrange(7)
+                        mutationIndex = 4
                         match mutationIndex:
                             case 0:
                                 print("splitEdge")
@@ -1249,12 +1250,15 @@ def geneNetworkEventHandler(event, geneNetwork):
                                 print("changeNodeIndex")
                                 geneNetwork.changeNodeIndex()
                             case 4:
+                                print("changeNodeGroupIndex")
+                                geneNetwork.changeNodeGroupIndex()
+                            case 5:
                                 print("flipEdge")
                                 geneNetwork.net.flipEdge()
-                            case 5:
+                            case 6:
                                 print("removeGene")
                                 geneNetwork.removeGene()
-                            case 6:
+                            case 7:
                                 print("removeGeneGroup")
                                 geneNetwork.removeGeneGroup()
 
@@ -1834,6 +1838,9 @@ class GeneNetwork:
         change the index of node at oldIndex to newIndex.
         newIndex max value is self.n - 1
         '''
+        if self.n == 0:
+            # skip if no nodes
+            return
         if oldIndex is None:
             oldIndex = random.randrange(self.n)
         if newIndex is None:
