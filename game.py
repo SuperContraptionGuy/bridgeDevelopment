@@ -1513,26 +1513,6 @@ class GeneNetwork:
     def checkEdgeCollision(self, testPoint):
         pass
 
-    # now, some more organic network modification functions
-    # split edge    create new node in place of an edge
-    # flip edge
-    # duplicate node
-    # duplicated group of nodes (range of indexes)
-    # change node index (regrouping/separating functional groups)
-    # change group of nodes index (transposable elements)
-    # move node along a connected edge ???
-    # move group of nodes along a connected edge ???
-    # delete node
-    # delete group of nodes (range of indexes)
-    # create random edge
-    # delete random existing edge
-    # redirect existing edge to random node
-    # scale edge weight
-    # negate weight
-    # scale parameter (k1, b, k2)
-    # negate bias
-    # merge nodes, combine their edges and parameters
-
     def drawArrow(self, surface, startNode, endNode=None, endPos=(0, 0),
                   width=None,
                   weight=None,
@@ -2438,8 +2418,6 @@ while running:
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         geneNetwork.update(dt)
-        if debug:
-            geneNetwork.net.mutate()
 
     # Render to the screen
 
