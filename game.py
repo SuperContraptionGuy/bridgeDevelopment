@@ -1495,6 +1495,16 @@ world = Box2D.b2World(gravity=(0, -10), doSleep=True)
 # list of bodies for simulation
 
 geneNetwork = network.GeneNetwork()
+cellArray = network.CellArray((100, 100))
+cellArray.geneNetwork.addGene()
+
+for (x, column) in enumerate(cellArray.z):
+    for (y, z) in enumerate(column):
+        # if x % 10 < 5 and y % 10 < 5:
+        if abs(y - 50) < 10 and abs(x - 50) < 10:
+            cellArray.z[x][y][0] = 10
+        else:
+            cellArray.z[x][y][0] = 0
 
 pr = cProfile.Profile()
 pr.enable()
@@ -1526,6 +1536,9 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F3:
                 debug = not debug
+            # for debugging, step the simulation
+            if event.key == pygame.K_s:
+                cellArray.update(dt)
 
             # These events depend on the interfaceState
             if interfaceState == interfaceStates['bridgeEdit']:
@@ -1560,6 +1573,7 @@ while running:
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
         geneNetwork.update(dt)
+        cellArray.update(dt)
 
     # Render to the screen
 
@@ -1592,6 +1606,7 @@ while running:
         # clear the screen
         screen.blit(geneNetworkBackground, (0, 0))
         geneNetwork.render(screen, network.GNIstate, debug)
+        cellArray.render(screen)
 
     # Flip buffers
     pygame.display.flip()

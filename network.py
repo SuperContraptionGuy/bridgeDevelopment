@@ -28,7 +28,10 @@ class RegulatoryNetwork:
     EXP_MAX = math.floor(math.log(sys.float_info.max))
     node_r = 20
 
-    def __init__(self):
+    def __init__(self,
+                 addConcentrationFunc=None,
+                 removeConcentrationFunc=None
+                 ):
         '''
         var  description                size
         z   concentrations matrix @t    n
@@ -38,15 +41,24 @@ class RegulatoryNetwork:
         k2  degradation rate            n
         '''
         # initalize internal neural network parameters
-        self.n = 0
 
+        # per cell variables
         self.z = []
-        self.k1 = []
-        self.k2 = []
-        self.b = []
 
-        self.edgeList = {}
+        # general shared parameters
+        self.addConcentrationFunc = addConcentrationFunc
+        self.removeConcentrationFunc = removeConcentrationFunc
 
+        self.k1 = []        # max expression rate
+        self.k2 = []        # degredation rate constant
+        self.b = []         # bias
+        self.sigma = []     # gaussian diffusion coefficient
+
+        self.n = 0          # number of morphogens
+
+        self.edgeList = {}  # regulatory iteraction weights
+
+        # display parameters, also shared
         self.locs = []
         self.colors = []
         self.displayIndicators = []
@@ -95,6 +107,7 @@ class RegulatoryNetwork:
                 w2=None,
                 b=None,
                 k2=None,
+                sigma=None,
                 copy=None,
                 newIndex=None):
         '''
@@ -127,8 +140,13 @@ class RegulatoryNetwork:
             # newIndex = self.n
             newIndex = random.randrange(self.n + 1)
 
+        if self.addConcentrationFunc is None:
+            self.z.insert(newIndex, random.expovariate(1))
+        else:
+            # use an external function to manage concentrations
+            self.addConcentrationFunc(newIndex)
+
         self.n += 1
-        self.z.insert(newIndex, random.expovariate(1))
         self.displayIndicators.insert(newIndex, False)
 
         if copy is not None:
@@ -136,6 +154,7 @@ class RegulatoryNetwork:
             self.k1.insert(newIndex, self.k1[copy])
             self.b.insert(newIndex, self.b[copy])
             self.k2.insert(newIndex, self.k2[copy])
+            self.sigma.insert(newIndex, self.sigma[copy])
             self.locs.insert(newIndex, self.locs[copy])
             self.colors.insert(newIndex, pygame.Color(self.colors[copy]))
 
@@ -144,6 +163,7 @@ class RegulatoryNetwork:
             self.k1.insert(newIndex, random.expovariate(1))
             self.b.insert(newIndex, random.gauss(0, 1))
             self.k2.insert(newIndex, random.expovariate(1))
+            self.sigma.insert(newIndex, random.expovariate(1))
             # self.locs.insert(newIndex, (0, 0))
             # use a random location
             self.locs.insert(newIndex,
@@ -161,6 +181,8 @@ class RegulatoryNetwork:
             self.b[newIndex] = b
         if k2 is not None:
             self.k2[newIndex] = k2
+        if sigma is not None:
+            self.sigma[newIndex] = sigma
         if loc is not None:
             self.locs[newIndex] = loc
         if color is not None:
@@ -197,7 +219,7 @@ class RegulatoryNetwork:
         # return index of new node
         return newIndex
 
-    def removeGene(self, i=None):
+    def removeGene(self, i=None, removeConcentrationFunc=None):
         '''
         Remove gene i and recalculates the edge list to match the shifted
         indicies
@@ -209,10 +231,16 @@ class RegulatoryNetwork:
             if i is None:
                 return
 
+        if self.removeConcentrationFunc is None:
+            self.z.pop(i)
+        else:
+            # use an external function to manage concentrations
+            self.removeConcentrationFunc(i)
+
         self.k1.pop(i)
         self.b.pop(i)
         self.k2.pop(i)
-        self.z.pop(i)
+        self.sigma.pop(i)
         self.locs.pop(i)
         self.colors.pop(i)
         self.displayIndicators.pop(i)
@@ -833,7 +861,7 @@ class RegulatoryNetwork:
         self.setWeight(i, j, 0)
         self.setWeight(newi, newj, weight)
 
-    def scaleParameter(self, node=None, k1=None, k2=None, b=None):
+    def scaleParameter(self, node=None, k1=None, k2=None, b=None, sigma=None):
         '''
         scales a parameter of node.
 
@@ -857,22 +885,28 @@ class RegulatoryNetwork:
                 k2 = random.gammavariate(4, 1 / 4)
             if b is None:
                 b = random.gammavariate(4, 1 / 4)
+            if sigma is None:
+                sigma = random.gammavariate(4, 1 / 4)
         else:
             k1 = 1
             k2 = 1
             b = 1
+            sigma = 1
             # pick a random parameter to tweak
-            match random.randrange(3):
+            match random.randrange(4):
                 case 0:
                     k1 = random.gammavariate(4, 1 / 4)
                 case 1:
                     k2 = random.gammavariate(4, 1 / 4)
                 case 2:
                     b = random.gammavariate(4, 1 / 4)
+                case 3:
+                    sigma = random.gammavariate(4, 1 / 4)
 
         self.k1[node] = self.k1[node] * k1
         self.k2[node] = self.k2[node] * k2
         self.b[node] = self.b[node] * b
+        self.sigma[node] = self.sigma[node] * sigma
 
     def negateBias(self, node=None):
         '''
@@ -2039,7 +2073,7 @@ class GeneNetwork:
                 surface.blit(text, textpos)
 
 
-class CellNetwork:
+class CellArray:
     '''
     Defines a population of cells connected in a network. Defines which
     morphogens are intra-cell, cell-cell direct contact, or diffusive, and
@@ -2057,8 +2091,110 @@ class CellNetwork:
     differentiated by the concentrations of morphogens present in each cell.
     '''
 
-    def __init__(self):
-        # let's just make a grid for testing
-        pass
+    def __init__(self, size):
 
-    pass
+        # concentration array, 2 dimensions of space x # of morphogens
+        self.z = [
+            [[] for y in range(size[1])]
+            for x in range(size[0])]
+
+        self.geneNetwork = RegulatoryNetwork()
+
+        self.geneNetwork.addConcentrationFunc = self.addGene
+        self.geneNetwork.removeConcentrationFunc = self.removeGene
+
+    def step(self, dt):
+        # copy the concentration array
+        newz = []
+        for (x, column) in enumerate(self.z):
+            newz.append([])
+            for (y, z) in enumerate(column):
+                newz[x].append([])
+                for zn in self.z[x][y]:
+                    newz[x][y].append(zn)
+
+        xmax = len(self.z)
+        ymax = len(column)
+        for i in range(self.geneNetwork.n):
+            # calculate kernel size for each morphogen, as each one
+            # can have a unique diffusion constant (sigma, molecular
+            # size, membrane diffusion rate, etc)
+            kernelHalf = math.ceil(3 * self.geneNetwork.sigma[i])
+            kernelSize = int(2 * kernelHalf + 1)
+            kernelSum = 0
+            kernelValues = []
+            kernelOffsets = list(range(-kernelHalf, kernelHalf + 1))
+
+            # calculate kernel parameters and normalization number
+            for x in kernelOffsets:
+                kernelValues.append(
+                    math.exp(-x**2 / (2 * self.geneNetwork.sigma[i]**2)) /
+                    math.sqrt(2 * math.pi * self.geneNetwork.sigma[i]**2))
+                kernelSum += kernelValues[-1]
+
+            for (x, column) in enumerate(self.z):
+                for (y, z) in enumerate(column):
+                    # compute the diffusion kernel, one axis at a time
+                    kernel = 0
+                    for (j, kernelValue) in enumerate(kernelValues):
+                        kernel += self.z[
+                            (x + kernelOffsets[j]) % xmax][y][i] \
+                            * kernelValue / kernelSum
+                    self.z[x][y][i] = kernel
+            for (x, column) in enumerate(self.z):
+                for (y, z) in enumerate(column):
+                    # compute the diffusion kernel, one axis at a time
+                    kernel = 0
+                    for (j, kernelValue) in enumerate(kernelValues):
+                        kernel += self.z[x][
+                            (y + kernelOffsets[j]) % ymax][i] \
+                            * kernelValue / kernelSum
+                    self.z[x][y][i] = kernel
+                    # self.z now contains the effect of the diffusion kernel
+                    # in two dimensions
+
+            for (x, column) in enumerate(self.z):
+                for (y, z) in enumerate(column):
+                    # compute the diffusion kernel, one axis at a time
+                    # calculate_dt
+                    # dz = self.geneNetwork.calculate_dz(z)
+                    dz = 0
+                    newz[x][y][i] += dz * dt
+
+        for (x, column) in enumerate(newz):
+            for (y, z) in enumerate(column):
+                for (i, zi) in enumerate(z):
+                    # sum together all changes to be made to z
+                    # all integrations map to the producers coordinates, onto z
+                    # integrate intracell morphogens, persistant
+                    # integrate diffusion morphogens, persistant
+                    # integrate intercell, persistant
+                    # self.z[x][y][i] += dz[i] * dt
+                    pass
+
+    # callback functions to manage self.z
+    def addGene(self, newIndex):
+
+        for column in self.z:
+            for z in column:
+                z.insert(newIndex, random.expovariate(1))
+
+    def removeGene(self, index):
+
+        for column in self.z:
+            for z in column:
+                z.pop(index)
+
+    def update(self, dt):
+        self.step(dt)
+
+    def render(self, surface):
+        # render the concentration values to an array of pixels
+
+        for (x, column) in enumerate(self.z):
+            for (y, z) in enumerate(column):
+                # for testing I'll just render the first 3 concentrations
+                # as rgb
+                pygame.gfxdraw.pixel(surface, x, y, (min(z[0] * 255, 255),
+                                                     min(z[0] * 255, 255),
+                                                     min(z[0] * 255, 255)))
