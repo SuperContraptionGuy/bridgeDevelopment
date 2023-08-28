@@ -1494,17 +1494,13 @@ world = Box2D.b2World(gravity=(0, -10), doSleep=True)
 
 # list of bodies for simulation
 
-geneNetwork = network.GeneNetwork()
-cellArray = network.CellArray((100, 100))
+cellArray = network.CellArray((50, 50))
 cellArray.geneNetwork.addGene()
+cellArray.geneNetwork.addGene()
+cellArray.geneNetwork.addGene()
+geneNetwork = network.GeneNetwork(cellArray.geneNetwork, cellArray.z[0][0])
+cellArray.geneNetwork.sigma = [1, 1, 1]
 
-for (x, column) in enumerate(cellArray.z):
-    for (y, z) in enumerate(column):
-        # if x % 10 < 5 and y % 10 < 5:
-        if abs(y - 50) < 10 and abs(x - 50) < 10:
-            cellArray.z[x][y][0] = 10
-        else:
-            cellArray.z[x][y][0] = 0
 
 pr = cProfile.Profile()
 pr.enable()
@@ -1531,14 +1527,31 @@ while running:
                                      debug,
                                      EditorVars)
         elif interfaceState == interfaceStates['geneNetworkSimulate']:
-            network.geneNetworkEventHandler(event, geneNetwork, network.GNIstate)
+            network.geneNetworkEventHandler(event,
+                                            geneNetwork,
+                                            network.GNIstate)
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F3:
                 debug = not debug
-            # for debugging, step the simulation
-            if event.key == pygame.K_s:
-                cellArray.update(dt)
+            if event.key == pygame.K_c:
+                for (x, column) in enumerate(cellArray.z):
+                    for (y, z) in enumerate(column):
+                        # if x % 10 < 5 and y % 10 < 5:
+                        if abs(y - 25) < 10 and abs(x - 25) < 10:
+                            cellArray.z[x][y][0] = 10
+                        else:
+                            cellArray.z[x][y][0] = 0
+                        if abs(y - 50) < 10 and abs(x - 50) < 10:
+                            cellArray.z[x][y][1] = 10
+                        else:
+                            cellArray.z[x][y][1] = 0
+                        if abs(y - 75) < 10 and abs(x - 75) < 10:
+                            cellArray.z[x][y][2] = 10
+                        else:
+                            cellArray.z[x][y][2] = 0
+                        for (i, zi) in enumerate(z):
+                            cellArray.z[x][y][i] = random.expovariate(1)
 
             # These events depend on the interfaceState
             if interfaceState == interfaceStates['bridgeEdit']:
@@ -1572,7 +1585,7 @@ while running:
         world.Step(TIME_STEP, 30, 30)
         SimulatorVars.steps += 1
     elif interfaceState == interfaceStates["geneNetworkSimulate"]:
-        geneNetwork.update(dt)
+        # geneNetwork.update(dt)
         cellArray.update(dt)
 
     # Render to the screen

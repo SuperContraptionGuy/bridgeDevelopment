@@ -140,9 +140,9 @@ class RegulatoryNetwork:
             # newIndex = self.n
             newIndex = random.randrange(self.n + 1)
 
-        if self.addConcentrationFunc is None:
-            self.z.insert(newIndex, random.expovariate(1))
-        else:
+        # for display at least, if not simulation
+        self.z.insert(newIndex, random.expovariate(1))
+        if self.addConcentrationFunc is not None:
             # use an external function to manage concentrations
             self.addConcentrationFunc(newIndex)
 
@@ -231,9 +231,9 @@ class RegulatoryNetwork:
             if i is None:
                 return
 
-        if self.removeConcentrationFunc is None:
-            self.z.pop(i)
-        else:
+        # for display at least
+        self.z.pop(i)
+        if self.removeConcentrationFunc is not None:
             # use an external function to manage concentrations
             self.removeConcentrationFunc(i)
 
@@ -1305,8 +1305,9 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
     #   b is bias - offsets the constituative rate of expression before
     #       logistic curve is applied, so 0 in centered on .5
     #   m is max rate - k1 parameter, scales max expression rate
-    #   d is degredation rate constant - k2 parameter for kinetic equation
+    #   r is removal rate constant - k2 parameter for kinetic equation
     #       of degredation
+    #   d is diffusion rate - sigma parameter for gaussian diffusion kernel
     #   no key held down perturbs the concentration. simulation of that node
     #       is paused until mouse hovers off, so effectively the concentration
     #       is pinned at some value. (paused, or simply the concentration is
@@ -1425,9 +1426,12 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                         elif keys[pygame.K_m]:
                             # adjust k1
                             geneNetwork.net.k1[GNIstate.hoveringNode] += 0.1
-                        elif keys[pygame.K_d]:
+                        elif keys[pygame.K_r]:
                             # adjust k2
                             geneNetwork.net.k2[GNIstate.hoveringNode] += 0.1
+                        elif keys[pygame.K_d]:
+                            # adjust sigma
+                            geneNetwork.net.sigma[GNIstate.hoveringNode] += 0.1
                         else:
                             # if no keys pressed, zoom.
                             geneNetwork.zoomTo(1.05,
@@ -1451,9 +1455,12 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                     elif keys[pygame.K_m]:
                         # adjust k1
                         geneNetwork.net.k1[GNIstate.hoveringNode] += 0.1
-                    elif keys[pygame.K_d]:
+                    elif keys[pygame.K_r]:
                         # adjust k2
                         geneNetwork.net.k2[GNIstate.hoveringNode] += 0.1
+                    elif keys[pygame.K_d]:
+                        # adjust sigma
+                        geneNetwork.net.sigma[GNIstate.hoveringNode] += 0.1
                     else:
                         # geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] += 0.1
                         geneNetwork.net.setWeight(
@@ -1477,11 +1484,16 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                             geneNetwork.net.k1[GNIstate.hoveringNode] = max(
                                 geneNetwork.net.k1[GNIstate.hoveringNode] - 0.1,
                                 0)
-                        elif keys[pygame.K_d]:
+                        elif keys[pygame.K_r]:
                             # adjust k2, clamp positive
                             geneNetwork.net.k2[GNIstate.hoveringNode] = max(
                                 geneNetwork.net.k2[GNIstate.hoveringNode] - 0.1,
                                 0)
+                        elif keys[pygame.K_d]:
+                            # adjust sigma
+                            geneNetwork.net.sigma[GNIstate.hoveringNode] = max(
+                                geneNetwork.net.sigma[GNIstate.hoveringNode] -
+                                0.1, 0)
                         else:
                             # if no keys pressed, zoom.
                             geneNetwork.zoomTo(1 / 1.05,
@@ -1507,11 +1519,16 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                         geneNetwork.net.k1[GNIstate.hoveringNode] = max(
                             geneNetwork.net.k1[GNIstate.hoveringNode] - 0.1,
                             0)
-                    elif keys[pygame.K_d]:
+                    elif keys[pygame.K_r]:
                         # adjust k2, clamp positive
                         geneNetwork.net.k2[GNIstate.hoveringNode] = max(
                             geneNetwork.net.k2[GNIstate.hoveringNode] - 0.1,
                             0)
+                    elif keys[pygame.K_d]:
+                        # adjust sigma
+                        geneNetwork.net.sigma[GNIstate.hoveringNode] = max(
+                            geneNetwork.net.sigma[GNIstate.hoveringNode] -
+                            0.1, 0)
                     else:
                         # geneNetwork.net.w[GNIstate.newEdgeEnd][GNIstate.newEdgeStart] -= 0.1
                         geneNetwork.net.setWeight(
@@ -1679,8 +1696,10 @@ class GeneNetwork:
     indicatorColor_k2 = (255, 0, 0)
     f = None
 
-    def __init__(self):
-        self.net = RegulatoryNetwork()
+    def __init__(self, net, z):
+        # self.net = RegulatoryNetwork()
+        self.net = net
+        self.z = z
 
         self.pan = [0, 0]
         self.zoom = 1
@@ -1844,6 +1863,7 @@ class GeneNetwork:
         # draw bars to indicate input contributions, constituative
         # expression rate, degredation rate, and total dz/dt
         # draw b bar
+        # draw diffusion gaussian curve
         origin = v.sum(self.cordsToScreen(self.net.locs[i]),
                        (-self.indicatorSigmoid_w / 2 * self.zoom,
                         self.indicators_w * 2 * self.zoom))
@@ -1912,7 +1932,7 @@ class GeneNetwork:
 
         # draw degredation rate
         origin = v.sum(end, (width, 0))
-        length = -self.net.k2[i] * self.net.z[i] * self.indicators_dzdt_scale * self.zoom
+        length = -self.net.k2[i] * self.z[i] * self.indicators_dzdt_scale * self.zoom
         end = v.sum(origin, (0, -length))
         pygame.draw.polygon(surface,
                             pygame.Color("Red"),
@@ -1946,6 +1966,31 @@ class GeneNetwork:
                           False,
                           fi,
                           2)
+        # defin sigmoid function samples at this scale
+        self.g = []
+        fmin = -self.indicatorSigmoid_w / 2 / self.indicators_z_scale
+        fmax = self.indicatorSigmoid_w / 2 / self.indicators_z_scale
+        fstep = 1 / self.indicators_z_scale / self.zoom
+        fsteps = min(max(int((fmax - fmin) / fstep), 2), 30)
+        fstep = (fmax - fmin) / fsteps
+        for step in range(fsteps):
+            x = fmin + fstep * step
+            self.g.append((x * self.indicators_z_scale,
+                           CellArray.gaussian(None, x, self.net.sigma[i]) *
+                           self.indicators_dzdt_scale))
+        # draw diffusion gaussian
+        fi = []
+        for p in self.g:
+            fi.append(v.sum(self.cordsToScreen(
+                v.sum(
+                    self.net.locs[i],
+                    (p[0], -p[1]))),
+                           (-self.indicatorSigmoid_w / 2 * self.zoom, 0)))
+        pygame.draw.lines(surface,
+                          pygame.Color("Black"),
+                          False,
+                          fi,
+                          2)
         # draw axis
         pygame.draw.line(surface,
                          pygame.Color("Black"),
@@ -1959,7 +2004,7 @@ class GeneNetwork:
     def update(self, dt):
         # simulate the network using the built in single cell concentration
         # array z.
-        self.net.step(self.net.z, dt)
+        self.net.step(self.z, dt)
 
     def render(self, surface, GNIstate, debug=False):
 
@@ -1988,12 +2033,15 @@ class GeneNetwork:
                                int(self.node_r * self.zoom),
                                max(int(self.node_t * self.zoom), 1))
             # draw concentration indicator
+            if self.z[i] == 0:
+                radius = 0
+            else:
+                radius = int(1 / (1 + 1 / self.z[i]) *
+                             self.node_r * 0.9 * self.zoom)
             pygame.draw.circle(surface,
                                self.net.colors[i],
                                v.vint(self.cordsToScreen(self.net.locs[i])),
-                               int(
-                                1 / (1 + 1 / self.net.z[i]) *
-                                self.node_r * 0.9 * self.zoom))
+                               radius)
             # draw index number
             if debug:
                 text = font.render(i.__str__(),
@@ -2023,7 +2071,7 @@ class GeneNetwork:
                     # add length for indicator to draw
                     indicators.append((color,
                                        self.net.getWeight(i, j) *
-                                       self.net.z[j]))
+                                       self.z[j]))
 
             # draw indicators for node if enabled or hovered
             if GNIstate.hoveringNode is not None:
@@ -2103,6 +2151,16 @@ class CellArray:
         self.geneNetwork.addConcentrationFunc = self.addGene
         self.geneNetwork.removeConcentrationFunc = self.removeGene
 
+    def gaussian(self, x, sigma):
+        if sigma == 0:
+            if x == 0:
+                return 1
+            else:
+                return 0
+        else:
+            return math.exp(-x**2 / (2 * sigma**2)) / \
+                    math.sqrt(2 * math.pi * sigma**2)
+
     def step(self, dt):
         # copy the concentration array
         newz = []
@@ -2115,6 +2173,8 @@ class CellArray:
 
         xmax = len(self.z)
         ymax = len(column)
+        # TODO these series of kernels and for loops should be done as shaders
+        # on a GPU, not like this
         for i in range(self.geneNetwork.n):
             # calculate kernel size for each morphogen, as each one
             # can have a unique diffusion constant (sigma, molecular
@@ -2125,52 +2185,56 @@ class CellArray:
             kernelValues = []
             kernelOffsets = list(range(-kernelHalf, kernelHalf + 1))
 
-            # calculate kernel parameters and normalization number
+            # calculate kernel parameters and normalize
             for x in kernelOffsets:
-                kernelValues.append(
-                    math.exp(-x**2 / (2 * self.geneNetwork.sigma[i]**2)) /
-                    math.sqrt(2 * math.pi * self.geneNetwork.sigma[i]**2))
+                kernelValues.append(self.gaussian(x,
+                                                  self.geneNetwork.sigma[i]))
                 kernelSum += kernelValues[-1]
+            for (j, value) in enumerate(kernelValues):
+                kernelValues[j] = value / kernelSum
 
+            # diffusion kernel horizontal
             for (x, column) in enumerate(self.z):
                 for (y, z) in enumerate(column):
                     # compute the diffusion kernel, one axis at a time
                     kernel = 0
                     for (j, kernelValue) in enumerate(kernelValues):
-                        kernel += self.z[
+                        kernel += newz[
                             (x + kernelOffsets[j]) % xmax][y][i] \
-                            * kernelValue / kernelSum
-                    self.z[x][y][i] = kernel
+                            * kernelValue
+                    newz[x][y][i] = kernel
+            # diffusion kernel vertical
             for (x, column) in enumerate(self.z):
                 for (y, z) in enumerate(column):
                     # compute the diffusion kernel, one axis at a time
                     kernel = 0
                     for (j, kernelValue) in enumerate(kernelValues):
-                        kernel += self.z[x][
+                        kernel += newz[x][
                             (y + kernelOffsets[j]) % ymax][i] \
-                            * kernelValue / kernelSum
-                    self.z[x][y][i] = kernel
+                            * kernelValue
+                    newz[x][y][i] = kernel
                     # self.z now contains the effect of the diffusion kernel
                     # in two dimensions
 
+            # geneNetwork dt. For now, all morphogens are diffusive
             for (x, column) in enumerate(self.z):
                 for (y, z) in enumerate(column):
-                    # compute the diffusion kernel, one axis at a time
                     # calculate_dt
-                    # dz = self.geneNetwork.calculate_dz(z)
-                    dz = 0
-                    newz[x][y][i] += dz * dt
+                    dz = self.geneNetwork.calculate_dz(z)
+                    for (i, dzi) in enumerate(dz):
+                        newz[x][y][i] = max(newz[x][y][i] + dzi * dt, 0)
 
-        for (x, column) in enumerate(newz):
-            for (y, z) in enumerate(column):
-                for (i, zi) in enumerate(z):
-                    # sum together all changes to be made to z
-                    # all integrations map to the producers coordinates, onto z
-                    # integrate intracell morphogens, persistant
-                    # integrate diffusion morphogens, persistant
-                    # integrate intercell, persistant
-                    # self.z[x][y][i] += dz[i] * dt
-                    pass
+            for (x, column) in enumerate(newz):
+                for (y, z) in enumerate(column):
+                    for (i, newzi) in enumerate(z):
+                        # sum together all changes to be made to z
+                        # all integrations map to the producers coordinates, onto z
+                        # integrate intracell morphogens, persistant
+                        # integrate diffusion morphogens, persistant
+                        # integrate intercell, persistant
+                        self.z[x][y][i] = newzi
+                        pass
+            # self.z = newz
 
     # callback functions to manage self.z
     def addGene(self, newIndex):
@@ -2196,5 +2260,6 @@ class CellArray:
                 # for testing I'll just render the first 3 concentrations
                 # as rgb
                 pygame.gfxdraw.pixel(surface, x, y, (min(z[0] * 255, 255),
-                                                     min(z[0] * 255, 255),
-                                                     min(z[0] * 255, 255)))
+                                                     min(z[1] * 255, 255),
+                                                     min(z[2] * 255, 255)))
+                # min(z[2] * 255, 255)))
