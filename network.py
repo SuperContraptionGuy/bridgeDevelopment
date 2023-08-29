@@ -45,7 +45,7 @@ class RegulatoryNetwork:
         # per cell variables
         self.z = []
 
-        # general shared parameters
+        # general shared parameters, per morphogen
         self.addConcentrationFunc = addConcentrationFunc
         self.removeConcentrationFunc = removeConcentrationFunc
 
@@ -58,10 +58,11 @@ class RegulatoryNetwork:
 
         self.edgeList = {}  # regulatory iteraction weights
 
-        # display parameters, also shared
+        # display parameters, also shared per morphogen
         self.locs = []
         self.colors = []
         self.displayIndicators = []
+        self.displayChannels = []
 
     def setWeight(self, i, j, wij):
         # set the weight with parents j, i
@@ -148,6 +149,7 @@ class RegulatoryNetwork:
 
         self.n += 1
         self.displayIndicators.insert(newIndex, False)
+        self.displayChannels.insert(newIndex, None)
 
         if copy is not None:
             # copy parameters from copy, but not edges
@@ -244,6 +246,7 @@ class RegulatoryNetwork:
         self.locs.pop(i)
         self.colors.pop(i)
         self.displayIndicators.pop(i)
+        self.displayChannels.pop(i)
 
         # entire edge list must be re-keyed since all indexes changed.
         # edges that involve the node being deleted must also be deleted
@@ -1242,6 +1245,10 @@ class GNIstate:
     movingNodeOffset = (0, 0)
     hoveringNode = None
 
+    # there are three color channels to display through the cellArray. The
+    # last three morphogens to be selected with i should be displayed on those
+    # channels
+
     showHelp = True
 
     helpString = [
@@ -1317,6 +1324,10 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
     # on hover over a node, display the concentration value
     # on hover while one of the above modifyer keys is held down, display
     #   the appropriate parameter value and name, like "k1=1"
+    # on hover over node, display indicators
+    #   i while hovering to toggle the indicator display persistence
+    # b on hover 3 nodes will display on the
+    #   R, G, B channels of the cellArray render output
     if event.type == pygame.KEYDOWN:
         GNIstate.mousePos = pygame.mouse.get_pos()
         collision = geneNetwork.checkNodeCollision(
@@ -1335,6 +1346,7 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                     case pygame.K_x:
                         # x it out
                         # delete a node if hovering
+                        # remove it from displayed channels
                         if GNIstate.hoveringNode is not None:
                             geneNetwork.net.removeGene(GNIstate.hoveringNode)
                             GNIstate.hoveringNode = None
@@ -1344,8 +1356,34 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
                         # change state of indicators for node if hovering
                         if GNIstate.hoveringNode is not None:
                             geneNetwork.net.displayIndicators[
-                                GNIstate.hoveringNode] = not geneNetwork.net.displayIndicators[
+                                GNIstate.hoveringNode] = not \
+                                geneNetwork.net.displayIndicators[
                                 GNIstate.hoveringNode]
+
+                    case pygame.K_g:
+                        # graph display concentration value on RGB channel
+                        # add node to display channels
+                        if GNIstate.hoveringNode is not None:
+                            # add node to RGB display channel list if it's not
+                            # already there, and remove it if it is
+                            if geneNetwork.net.displayChannels[GNIstate.hoveringNode] is None:
+                                # not displayed, see what's available
+                                availableChannels = [True, True, True]
+                                for displayChannel in geneNetwork.net.displayChannels:
+                                    if displayChannel is not None:
+                                        # channel taken
+                                        availableChannels[displayChannel] = False
+                                if True in availableChannels:
+                                    # there is at least one available, use the
+                                    # first available channel
+                                    channel = availableChannels.index(True)
+                                    geneNetwork.net.displayChannels[GNIstate.hoveringNode] = channel
+                                else:
+                                    # none were available, don't add.
+                                    pass
+                            else:
+                                # already on a channel, remove it
+                                geneNetwork.net.displayChannels[GNIstate.hoveringNode] = None
 
                     case pygame.K_z:
                         # Zap!
@@ -1598,9 +1636,10 @@ def geneNetworkEventHandler(event, geneNetwork, GNIstate):
 
                 case GNIstate.MOUSEDOWNNOCOLLISION:
                     GNIstate.state = GNIstate.NONE
-                    # create a node
+                    # create a node, insert at end of list
                     newNode = geneNetwork.net.addGene(
-                        geneNetwork.screenToCords(event.pos))
+                        geneNetwork.screenToCords(event.pos),
+                        newIndex=geneNetwork.net.n)
                     # set hovering node
                     GNIstate.hoveringNode = newNode
 
@@ -1859,7 +1898,7 @@ class GeneNetwork:
                  v.sum(end, v.sum(v.mul(perpUnit, -radius),
                                   v.mul(perpaunit, -radius * 2)))))])
 
-    def drawIndicators(self, surface, i, indicators):
+    def drawIndicators(self, surface, i, indicators, GNIstate):
         # draw bars to indicate input contributions, constituative
         # expression rate, degredation rate, and total dz/dt
         # draw b bar
@@ -2023,6 +2062,34 @@ class GeneNetwork:
         if debug:
             font = pygame.font.Font(None, 24)
 
+        # draw edges and prepare indicators object
+        indicators = {}
+        # also draw edges
+        # TODO: don't call pygame.draw if the shape is far off surface, it
+        # causes it to draw VERY slowely as it creates a HUGE area to
+        # pixelfill
+        # for j in range(self.net.n):
+        # for each edge into node i, draw if weight is not 0
+        # if self.net.getWeight(i, j) != 0:
+        for edge in self.net.edgeList.items():
+            (i, j) = edge[0]
+            weight = edge[1]
+            # draw an arrow
+            self.drawArrow(surface, j, i)
+
+            color = pygame.Color(self.net.colors[j])
+            if j == i:
+                # if it's self, adjust the color so it's visible
+                color.hsva = (color.hsva[0],
+                              color.hsva[1],
+                              color.hsva[2] * 0.8)
+            # add length for indicator to draw
+            if i not in indicators:
+                indicators[i] = []
+            indicators[i].append((color,
+                                  weight *
+                                  self.z[j]))
+
         # draw nodes
         # TODO: don't call pygame.draw if the shape is far off surface, it
         # causes it to draw VERY slowely as it creates a HUGE area to pixelfill
@@ -2051,37 +2118,32 @@ class GeneNetwork:
                 textpos.center = self.cordsToScreen(self.net.locs[i])
                 surface.blit(text, textpos)
 
-            indicators = []
-            # also draw edges
-            # TODO: don't call pygame.draw if the shape is far off surface, it
-            # causes it to draw VERY slowely as it creates a HUGE area to
-            # pixelfill
-            for j in range(self.net.n):
-                # for each edge into node i, draw if weight is not 0
-                if self.net.getWeight(i, j) != 0:
-                    # draw an arrow
-                    self.drawArrow(surface, j, i)
-
-                    color = pygame.Color(self.net.colors[j])
-                    if j == i:
-                        # if it's self, adjust the color so it's visible
-                        color.hsva = (color.hsva[0],
-                                      color.hsva[1],
-                                      color.hsva[2] * 0.8)
-                    # add length for indicator to draw
-                    indicators.append((color,
-                                       self.net.getWeight(i, j) *
-                                       self.z[j]))
-
             # draw indicators for node if enabled or hovered
-            if GNIstate.hoveringNode is not None:
-                if GNIstate.hoveringNode == i:
-                    self.drawIndicators(surface, i, indicators)
-                else:
-                    if self.net.displayIndicators[i]:
-                        self.drawIndicators(surface, i, indicators)
-            elif self.net.displayIndicators[i]:
-                self.drawIndicators(surface, i, indicators)
+            if (GNIstate.hoveringNode is not None and
+                    GNIstate.hoveringNode == i) or \
+                    self.net.displayIndicators[i]:
+                indicatorsi = []
+                if i in indicators:
+                    indicatorsi = indicators[i]
+                self.drawIndicators(surface, i, indicatorsi, GNIstate)
+
+            # draw color swatch to indicate RGB channel being displayed on, if
+            # node concentration is being displayed
+            if self.net.displayChannels[i] is not None:
+                match self.net.displayChannels[i]:
+                    case 0:
+                        color = (255, 0, 0)
+                    case 1:
+                        color = (0, 255, 0)
+                    case 2:
+                        color = (0, 0, 255)
+                    case _:
+                        color = (0, 0, 0)
+                pygame.draw.circle(surface,
+                                   color,
+                                   v.sum(self.cordsToScreen(self.net.locs[i]),
+                                         (0, self.node_r * 0.8 * self.zoom)),
+                                   self.node_r / 5 * self.zoom)
 
         # draw new edge
         if GNIstate.state == GNIstate.NEWEDGE:
@@ -2249,17 +2311,45 @@ class CellArray:
             for z in column:
                 z.pop(index)
 
+    def randomizeConcentrations(self):
+        '''Set the array of concentrations to a noise texture'''
+        for (x, column) in enumerate(self.z):
+            for (y, z) in enumerate(column):
+                for (i, zi) in enumerate(z):
+                    self.z[x][y][i] = random.expovariate(1)
+
     def update(self, dt):
         self.step(dt)
 
-    def render(self, surface):
-        # render the concentration values to an array of pixels
+    def render(self, surface, GNIstate):
+        '''render an array of pixels, three channels of morphogen
+        concentrations on RGB'''
 
+        # prepare the indexes for selected morphogens to render
+        displayChannels = [None, None, None]
+        for (i, displayChannel) in enumerate(self.geneNetwork.displayChannels):
+            if displayChannel is not None:
+                displayChannels[displayChannel] = i
+
+        # render the concentration values to an array of pixels
         for (x, column) in enumerate(self.z):
             for (y, z) in enumerate(column):
-                # for testing I'll just render the first 3 concentrations
-                # as rgb
-                pygame.gfxdraw.pixel(surface, x, y, (min(z[0] * 255, 255),
-                                                     min(z[1] * 255, 255),
-                                                     min(z[2] * 255, 255)))
-                # min(z[2] * 255, 255)))
+                # see how many concentrations are selected to display, and
+                # fill in values for each color channel based on the selection
+                color = [0, 0, 0]
+                for (i, displayChannel) in enumerate(displayChannels):
+                    if displayChannel is not None:
+                        color[i] = min(z[displayChannel] * 255, 255)
+
+                # render the pixel
+                pygame.gfxdraw.pixel(surface, x, y, color)
+
+
+def cellArrayEventHandler(event, cellArray, GNIstate):
+    # c - randomize concentrations
+    # left click on to select a point that the regulatoryNetwork concentration
+    #   display will be based on.
+
+    if event.type == pygame.KEYDOWN:
+        if event.key == pygame.K_c:
+            cellArray.randomizeConcentrations()
